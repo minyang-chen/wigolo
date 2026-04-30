@@ -10,6 +10,9 @@ vi.mock('node:fs', async () => {
     readFileSync: vi.fn(),
   };
 });
+vi.mock('../../../src/search/reranker/onnx.js', () => ({
+  onnxRerank: vi.fn().mockResolvedValue([{ index: 0, score: 0.9 }]),
+}));
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
