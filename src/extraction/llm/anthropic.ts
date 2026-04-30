@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { Tool } from '@anthropic-ai/sdk/resources/messages/messages.js';
 import type { LLMCallOpts, LLMExtractResult } from './types.js';
 
 const DEFAULT_MODEL = 'claude-haiku-4-5';
@@ -20,7 +21,7 @@ export async function callAnthropic(
         {
           name: TOOL_NAME,
           description: 'Return the extracted fields as structured JSON.',
-          input_schema: opts.jsonSchema as never,
+          input_schema: opts.jsonSchema as Tool.InputSchema,
         },
       ],
       tool_choice: { type: 'tool', name: TOOL_NAME },
