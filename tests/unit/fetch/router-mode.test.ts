@@ -69,6 +69,33 @@ describe('SmartRouter mode=fast', () => {
     );
   });
 
+  it('warns and discards browser actions when combined with mode=fast', async () => {
+    const warnings: Array<{ msg: string; data?: Record<string, unknown> }> = [];
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      try {
+        const line = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+        const parsed = JSON.parse(line.trim());
+        if (parsed.level === 'warn') warnings.push({ msg: parsed.msg, data: parsed.data });
+      } catch {
+        /* ignore non-JSON log lines */
+      }
+      return true;
+    });
+
+    await router.fetch('https://spa.test/page', {
+      mode: 'fast',
+      actions: [{ type: 'click', selector: '#x' }],
+    });
+
+    expect(browserPool.fetchWithBrowser).not.toHaveBeenCalled();
+    expect(httpClient.fetch).toHaveBeenCalledTimes(1);
+    expect(
+      warnings.some(w => /mode=fast.*ignores.*actions/i.test(w.msg)),
+    ).toBe(true);
+
+    stderrSpy.mockRestore();
+  });
+
   it('does not set jsRequired when content is rich', async () => {
     httpClient.fetch = vi.fn(async (url: string) => ({
       url,

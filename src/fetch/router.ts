@@ -58,6 +58,12 @@ export class SmartRouter {
 
     // Fast mode: HTTP-only with tight timeout, never escalates to a browser.
     if (mode === 'fast') {
+      if (actions && actions.length > 0) {
+        logger.warn('mode=fast ignores browser actions; switch to balanced/deep to execute them', {
+          url,
+          actionCount: actions.length,
+        });
+      }
       logger.debug('routing to http (fast)', { url });
       const result = await this.httpClient.fetch(url, {
         headers,
