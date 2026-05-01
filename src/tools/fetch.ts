@@ -14,6 +14,10 @@ import { createLogger } from '../logger.js';
 const log = createLogger('fetch');
 
 const DEFAULT_MAX_TOKENS_OUT = 4000;
+// Fetch is single-URL — users explicitly want the body. Keep a generous cap
+// that fits typical MCP tool-result limits (~25k tokens) but prevents huge
+// pages (full doc sites) from blowing the cap. Override via max_tokens_out.
+const DEFAULT_FETCH_BODY_TOKENS = 16000;
 
 async function attachEvidence(
   output: FetchOutput,
@@ -35,7 +39,7 @@ async function attachEvidence(
     output.markdown = '';
   } else if (output.markdown) {
     output.markdown = applyOutputBudget(output.markdown, {
-      maxTokensOut: input.max_tokens_out,
+      maxTokensOut: input.max_tokens_out ?? DEFAULT_FETCH_BODY_TOKENS,
       maxChars: input.max_chars,
     });
   }

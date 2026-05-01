@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.2 — 2026-05-01
+
+### FIX: `fetch` markdown body now bounded by default
+- Single-URL `fetch` previously returned the full markdown body unbounded when
+  the caller didn't set `max_tokens_out`/`max_chars`. Large documentation pages
+  could exceed the host's per-tool-result size cap and get truncated by the MCP
+  client. New default cap is 16000 tokens (~64KB), well under typical 25k-token
+  tool-result limits but generous enough for full doc pages. Override via
+  `max_tokens_out` or `max_chars` for tighter or looser caps.
+
 ## v1.0.1 — 2026-05-01
 
 ### FIX: `fetch` returns full markdown by default
