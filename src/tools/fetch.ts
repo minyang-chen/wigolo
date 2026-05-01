@@ -1,7 +1,8 @@
 import type { FetchInput, FetchOutput, CachedContent } from '../types.js';
 import type { SmartRouter } from '../fetch/router.js';
 import { extractContent } from '../extraction/pipeline.js';
-import { getCachedContent, cacheContent, isExpired } from '../cache/store.js';
+import { getCachedContent, cacheContent, isCacheUsable } from '../cache/store.js';
+import { getConfig } from '../config.js';
 import { extractSection } from '../extraction/markdown.js';
 import { detectChange } from '../cache/change-detector.js';
 import { getEmbeddingService } from '../embedding/embed.js';
@@ -81,12 +82,17 @@ export async function handleFetch(
   try {
     if (!input.force_refresh) {
       const cached = getCachedContent(input.url);
-      if (cached && !isExpired(cached) && (!input.actions || input.actions.length === 0)) {
-        log.info('Serving from cache', { url: input.url });
-        const out = formatCachedResponse(cached, input);
-        const fullMarkdown = out.markdown;
-        await attachEvidence(out, input, fullMarkdown);
-        return out;
+      if (cached && (!input.actions || input.actions.length === 0)) {
+        const staleMaxSeconds = mode === 'fast' ? getConfig().fastStaleMaxHours * 3600 : 0;
+        const { usable, stale } = isCacheUsable(cached, { staleMaxSeconds });
+        if (usable) {
+          log.info('Serving from cache', { url: input.url, stale });
+          const out = formatCachedResponse(cached, input);
+          if (stale) out.stale = true;
+          const fullMarkdown = out.markdown;
+          await attachEvidence(out, input, fullMarkdown);
+          return out;
+        }
       }
     }
 

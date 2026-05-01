@@ -168,6 +168,23 @@ export function isExpired(cached: CachedContent): boolean {
   return new Date(cached.expiresAt).getTime() < Date.now();
 }
 
+export interface CacheLookupOptions {
+  staleMaxSeconds?: number;
+}
+
+export function isCacheUsable(
+  cached: CachedContent,
+  opts: CacheLookupOptions = {},
+): { usable: boolean; stale: boolean } {
+  if (!cached.expiresAt) return { usable: true, stale: false };
+  const expiresMs = new Date(cached.expiresAt).getTime();
+  const now = Date.now();
+  if (expiresMs >= now) return { usable: true, stale: false };
+  const staleMaxMs = (opts.staleMaxSeconds ?? 0) * 1000;
+  if (now - expiresMs <= staleMaxMs) return { usable: true, stale: true };
+  return { usable: false, stale: false };
+}
+
 export function searchCache(query: string): CachedContent[] {
   const db = getDatabase();
 
