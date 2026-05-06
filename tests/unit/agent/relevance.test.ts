@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isValidCandidateUrl, isBlocklistedDomain, preFilterCandidates } from '../../../src/agent/relevance.js';
+import { agentSourcesToSearchResults, scoreAndFilterSources } from '../../../src/agent/executor.js';
 
 describe('isValidCandidateUrl', () => {
   it('rejects unparseable URLs', () => {
@@ -31,6 +32,28 @@ describe('isBlocklistedDomain', () => {
   });
   it('treats unparseable URLs as blocklisted (fail-closed)', () => {
     expect(isBlocklistedDomain('not a url')).toBe(true);
+  });
+});
+
+describe('agentSourcesToSearchResults', () => {
+  it('maps AgentSource[] → MergedSearchResult[] preserving url and title', () => {
+    const sources = [{ url: 'https://a', title: 'A', body: 'aa' }];
+    const out = agentSourcesToSearchResults(sources);
+    expect(out[0].url).toBe('https://a');
+    expect(out[0].title).toBe('A');
+  });
+});
+
+describe('scoreAndFilterSources', () => {
+  it('excludes sources with score < 0.1 with excluded_reason', async () => {
+    const sources = [
+      { url: 'https://a', title: 'PostgreSQL release notes', body: 'PostgreSQL 17.0 was released...' },
+      { url: 'https://b', title: 'Cooking pasta recipes', body: 'Boil water and add pasta' },
+    ];
+    const { kept, excluded } = await scoreAndFilterSources('latest postgres release', sources, { threshold: 0.1 });
+    expect(kept.find((k) => k.url === 'https://a')).toBeDefined();
+    const exclB = excluded.find((e) => e.source.url === 'https://b');
+    expect(exclB?.excluded_reason).toMatch(/below_threshold|low_relevance/);
   });
 });
 
