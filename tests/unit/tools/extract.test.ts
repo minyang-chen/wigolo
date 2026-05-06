@@ -321,6 +321,26 @@ describe('handleExtract mode=schema', () => {
   });
 });
 
+describe('handleExtract honesty', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getCachedContent).mockReturnValue(null);
+    vi.mocked(isExpired).mockReturnValue(false);
+    vi.mocked(extractTables).mockReturnValue([]);
+  });
+
+  it('returns no_tables_detected StageError when zero tables found', async () => {
+    const router = mockRouter();
+    const out = await handleExtract(
+      { url: 'https://example.com', mode: 'tables' } as any,
+      router as any,
+    );
+    expect((out as any).error).toBe('no_tables_detected');
+    expect((out as any).hint).toMatch(/stealth/);
+    expect((out as any).stage).toBe('extract');
+  });
+});
+
 describe('handleExtract mode=metadata with JSON-LD', () => {
   it('includes JSON-LD data in metadata output', async () => {
     vi.mocked(extractMetadata).mockReturnValue({ title: 'Test' });

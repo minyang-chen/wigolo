@@ -494,6 +494,7 @@ export interface ExtractInput {
   css_selector?: string;
   multiple?: boolean;
   schema?: JsonSchema;
+  execution_mode?: Mode;
 }
 
 export interface MetadataData {

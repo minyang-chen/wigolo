@@ -8,6 +8,7 @@ import {
 import { extractJsonLd } from '../extraction/jsonld.js';
 import { extractStructured } from '../extraction/structured.js';
 import { getCachedContent, isExpired } from '../cache/store.js';
+import { fetchWithPlaywright } from '../fetch/playwright-tier.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('extract');
@@ -16,6 +17,11 @@ async function resolveHtml(
   input: ExtractInput,
   router: SmartRouter,
 ): Promise<{ html: string; sourceUrl?: string }> {
+  if (input.execution_mode === 'stealth' && input.url) {
+    const pw = await fetchWithPlaywright(input.url);
+    return { html: pw.html, sourceUrl: input.url };
+  }
+
   if (input.url) {
     const cached = getCachedContent(input.url);
     if (cached && !isExpired(cached)) {
@@ -94,6 +100,16 @@ export async function handleExtract(
         data = meta;
         break;
       }
+    }
+
+    if (mode === 'tables' && Array.isArray(data) && data.length === 0) {
+      // StageError-shaped response; type widening deferred to T15
+      return {
+        error: 'no_tables_detected',
+        error_reason: 'No tables found on page',
+        stage: 'extract',
+        hint: 'no_tables_detected — page may require JavaScript; retry with stealth mode',
+      } as unknown as ExtractOutput;
     }
 
     return { data, source_url: sourceUrl, mode };
