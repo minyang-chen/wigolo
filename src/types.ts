@@ -3,6 +3,17 @@ import type { JsonSchema } from './extraction/schema.js';
 export type Mode = 'fast' | 'balanced' | 'deep';
 export const MODES: readonly Mode[] = ['fast', 'balanced', 'deep'] as const;
 
+export interface StageError {
+  error: string;
+  error_reason: string;
+  stage: string;
+  hint?: string;
+}
+
+export type StageResult<T> =
+  | { ok: true; data: T }
+  | ({ ok: false } & StageError);
+
 export type BrowserAction =
   | { type: 'click'; selector: string }
   | { type: 'type'; selector: string; text: string }
