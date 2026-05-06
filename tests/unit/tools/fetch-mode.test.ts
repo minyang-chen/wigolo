@@ -51,25 +51,14 @@ describe('fetch mode=fast', () => {
   beforeEach(() => { initDatabase(':memory:'); resetConfig(); });
   afterEach(() => { closeDatabase(); resetConfig(); });
 
-  it('passes mode=fast and renderJs=never to the router', async () => {
-    const router = {
-      fetch: vi.fn().mockResolvedValue({
-        url: 'https://example.com/',
-        finalUrl: 'https://example.com/',
-        html: '<html><body><p>hello world</p></body></html>',
-        contentType: 'text/html',
-        statusCode: 200,
-        method: 'http',
-        headers: {},
-      }),
-    } as unknown as SmartRouter;
+  it('returns cache_miss without calling router when mode=fast and url not cached', async () => {
+    const router = { fetch: vi.fn() } as unknown as SmartRouter;
 
-    await handleFetch({ url: 'https://example.com/', mode: 'fast' }, router);
+    const out = await handleFetch({ url: 'https://example.com/', mode: 'fast' }, router);
 
-    expect(router.fetch).toHaveBeenCalledWith(
-      'https://example.com/',
-      expect.objectContaining({ mode: 'cache', renderJs: 'never' }),
-    );
+    expect(router.fetch).not.toHaveBeenCalled();
+    expect((out as any).error).toBe('cache_miss');
+    expect((out as any).stage).toBe('fetch');
   });
 
   it('surfaces js_required when the router marks the raw result as a JS shell', async () => {
@@ -85,7 +74,7 @@ describe('fetch mode=fast', () => {
         jsRequired: true,
       }),
     } as unknown as SmartRouter;
-    const out = await handleFetch({ url: 'https://spa.test/', mode: 'fast' }, router);
+    const out = await handleFetch({ url: 'https://spa.test/' }, router);
     expect(out.js_required).toBe(true);
   });
 

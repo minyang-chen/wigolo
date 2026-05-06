@@ -85,7 +85,12 @@ export async function handleFetch(
   const mode = resolveMode(input.mode);
   try {
     if (!input.force_refresh) {
-      const cached = getCachedContent(input.url);
+      let cached: CachedContent | null = null;
+      try {
+        cached = getCachedContent(input.url);
+      } catch (err) {
+        log.debug('cache lookup failed; treating as miss', { url: input.url, error: String(err) });
+      }
       if (cached && (!input.actions || input.actions.length === 0)) {
         const staleMaxSeconds = mode === 'cache' ? getConfig().fastStaleMaxHours * 3600 : 0;
         const { usable, stale } = isCacheUsable(cached, { staleMaxSeconds });
@@ -100,14 +105,30 @@ export async function handleFetch(
       }
     }
 
+    if (mode === 'cache') {
+      // StageError-shaped response; type widening deferred to T15
+      return {
+        error: 'cache_miss',
+        error_reason: `URL not in cache: ${input.url}`,
+        stage: 'fetch',
+        hint: 'Use mode:default to fetch live, or run search/crawl first to populate cache',
+      } as unknown as FetchOutput;
+    }
+
     const raw = await router.fetch(input.url, {
-      renderJs: mode === 'cache' ? 'never' : (input.render_js ?? 'auto'),
+      renderJs: input.render_js ?? 'auto',
       useAuth: input.use_auth ?? false,
       headers: input.headers,
       screenshot: input.screenshot,
       actions: input.actions,
       mode,
     });
+
+    // T11: stealth mode can return a StageError (e.g., playwright_not_installed,
+    // playwright_fetch_failed). Surface it directly.
+    if ('error' in raw && typeof (raw as { error?: unknown }).error === 'string') {
+      return raw as unknown as FetchOutput;
+    }
 
     const extraction = await extractContent(raw.html, raw.finalUrl, {
       maxChars: input.max_chars,
