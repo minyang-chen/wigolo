@@ -16,7 +16,7 @@ import http from "node:http";
 import { search, research, crawl, version } from "./daemon-bridge.mjs";
 
 const PORT = parseInt(process.env.WIGOLO_DAEMON_PORT || "7878", 10);
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = parseInt(process.env.WIGOLO_DAEMON_REQUEST_TIMEOUT_MS || "120000", 10);
 
 const ROUTES = {
   "POST /search": async (body) => {
