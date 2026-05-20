@@ -13,8 +13,10 @@
  * To run locally:
  *   RUN_LEGACY_PARITY=1 npx vitest run tests/integration/search-legacy-parity.test.ts
  *
- * Snapshot regeneration: deferred. Run the pre-refactor `runSearxngSearch`
- * against the same SearXNG instance and write { query, expectedUrls } pairs.
+ * Snapshot regeneration: with `WIGOLO_SEARCH=searxng` and SearXNG reachable,
+ * run `npx tsx scripts/capture-search-parity-snapshot.ts > tests/integration/fixtures/search-parity-snapshot.json`.
+ * Snapshot generator script not yet implemented — tracked as Phase 1 follow-up.
+ * Until then, `RUN_LEGACY_PARITY=1` should not be set.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -25,7 +27,7 @@ import {
   _resetSearchProviderForTest,
   type SearchContext,
 } from '../../src/providers/search-provider.js';
-import { _resetConfigForTest } from '../../src/config.js';
+import { resetConfig } from '../../src/config.js';
 import type { SearchEngine } from '../../src/types.js';
 import type { SmartRouter } from '../../src/fetch/router.js';
 
@@ -65,7 +67,7 @@ describe.skipIf(!RUN)('legacy search parity', () => {
     async ({ query, expectedUrls }) => {
       process.env.WIGOLO_SEARCH = 'searxng';
       _resetSearchProviderForTest();
-      _resetConfigForTest();
+      resetConfig();
       const provider = await getSearchProvider();
       const ctx: SearchContext = { engines, router };
       const result = await provider.search(

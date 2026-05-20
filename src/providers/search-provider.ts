@@ -35,10 +35,12 @@ export function getSearchProvider(): Promise<SearchProvider> {
   if (which === 'searxng') {
     cached = import('../search/legacy/searxng-provider.js').then(
       m => new m.LegacySearxngProvider(),
+      err => { cached = null; throw err; },
     );
   } else if (which === 'v1') {
     cached = import('../search/v1/stub-provider.js').then(
       m => new m.V1StubProvider(),
+      err => { cached = null; throw err; },
     );
   } else {
     return Promise.reject(new Error(

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getSearchProvider, _resetSearchProviderForTest } from '../../../src/providers/search-provider.js';
-import { _resetConfigForTest } from '../../../src/config.js';
+import { resetConfig } from '../../../src/config.js';
 import { LegacySearxngProvider } from '../../../src/search/legacy/searxng-provider.js';
 import { V1StubProvider } from '../../../src/search/v1/stub-provider.js';
 
@@ -9,13 +9,13 @@ describe('getSearchProvider', () => {
   beforeEach(() => {
     originalEnv = process.env.WIGOLO_SEARCH;
     _resetSearchProviderForTest();
-    _resetConfigForTest();
+    resetConfig();
   });
   afterEach(() => {
     if (originalEnv === undefined) delete process.env.WIGOLO_SEARCH;
     else process.env.WIGOLO_SEARCH = originalEnv;
     _resetSearchProviderForTest();
-    _resetConfigForTest();
+    resetConfig();
   });
 
   it('returns LegacySearxngProvider by default', async () => {
@@ -36,5 +36,14 @@ describe('getSearchProvider', () => {
   it('rejects on unknown value', async () => {
     process.env.WIGOLO_SEARCH = 'tavily';
     await expect(getSearchProvider()).rejects.toThrow(/WIGOLO_SEARCH/);
+  });
+
+  it('recovers from prior rejection on next call', async () => {
+    process.env.WIGOLO_SEARCH = 'tavily';
+    await expect(getSearchProvider()).rejects.toThrow(/WIGOLO_SEARCH/);
+    // The unknown-value path never sets `cached`, so the next call with a
+    // valid value must succeed without needing _resetSearchProviderForTest.
+    process.env.WIGOLO_SEARCH = 'searxng';
+    expect(await getSearchProvider()).toBeInstanceOf(LegacySearxngProvider);
   });
 });
