@@ -591,3 +591,130 @@ describe('runV1Search — output shape & misc', () => {
     expect(out.outcomes[0].ok).toBe(true);
   });
 });
+
+describe('runV1Search — recency boost', () => {
+  function withDate(
+    engineName: string,
+    url: string,
+    publishedDate: string | undefined,
+  ): RawSearchResult {
+    return {
+      title: url,
+      url,
+      snippet: `snippet for ${url}`,
+      relevance_score: 1,
+      engine: engineName,
+      published_date: publishedDate,
+    };
+  }
+
+  const today = new Date().toISOString();
+  const twoYearsAgo = new Date(
+    Date.now() - 730 * 86_400_000,
+  ).toISOString();
+
+  it('promotes a recent result above an older one for "latest news AI"', async () => {
+    // Single engine returns the older URL first (rank 1) and the recent URL second.
+    // Without recency boost the older URL would win on RRF rank. With boost the
+    // recent URL multiplier (~2.0) beats the older URL's ~1.0 despite worse rank.
+    const { entry } = makeEntry({
+      name: 'hn',
+      results: [
+        withDate('hn', 'https://old.test/a', twoYearsAgo),
+        withDate('hn', 'https://new.test/b', today),
+      ],
+    });
+    verticalState.news = [entry];
+
+    const out = await runV1Search({ query: 'latest news AI' });
+    expect(out.vertical).toBe('news');
+    // recent: 2.0 / 62 ≈ 0.0323; old: 1.0 / 61 ≈ 0.0164
+    expect(out.results[0].url).toBe('https://new.test/b');
+    expect(out.results[1].url).toBe('https://old.test/a');
+  });
+
+  it('does not apply recency boost for a query without temporal intent', async () => {
+    // Without temporal intent ordering follows engine rank regardless of published_date.
+    const { entry } = makeEntry({
+      name: 'bing',
+      results: [
+        withDate('bing', 'https://old.test/a', twoYearsAgo),
+        withDate('bing', 'https://new.test/b', today),
+      ],
+    });
+    verticalState.general = [entry];
+
+    const out = await runV1Search({ query: 'best pizza in new york' });
+    expect(out.vertical).toBe('general');
+    expect(out.results[0].url).toBe('https://old.test/a');
+    expect(out.results[1].url).toBe('https://new.test/b');
+  });
+
+  it('applies recency boost when vertical is news even without keywords', async () => {
+    // Force news via category hint; recency boost should still flip ordering.
+    const { entry } = makeEntry({
+      name: 'hn',
+      results: [
+        withDate('hn', 'https://old.test/a', twoYearsAgo),
+        withDate('hn', 'https://new.test/b', today),
+      ],
+    });
+    verticalState.news = [entry];
+
+    const out = await runV1Search({
+      query: 'quantum computing',
+      category: 'news',
+    });
+    expect(out.results[0].url).toBe('https://new.test/b');
+  });
+
+  it('parses natural-language date hint and forwards it to engine options', async () => {
+    const { entry, spy } = makeEntry({
+      name: 'hn',
+      supportsDateFilter: true,
+      results: [makeResult('hn', 'https://news.test/a')],
+    });
+    verticalState.news = [entry];
+
+    await runV1Search({ query: 'AI news between 2023 and 2024' });
+    const opts = spy.mock.calls[0][1] as SearchEngineOptions;
+    expect(opts.fromDate).toBe('2023-01-01');
+    expect(opts.toDate).toBe('2024-12-31');
+  });
+
+  it('caller-supplied fromDate overrides inferred date hint', async () => {
+    const { entry, spy } = makeEntry({
+      name: 'hn',
+      supportsDateFilter: true,
+      results: [makeResult('hn', 'https://news.test/a')],
+    });
+    verticalState.news = [entry];
+
+    await runV1Search({
+      query: 'AI news between 2023 and 2024',
+      fromDate: '2025-06-01',
+    });
+    const opts = spy.mock.calls[0][1] as SearchEngineOptions;
+    expect(opts.fromDate).toBe('2025-06-01');
+    // toDate falls through to the inferred hint since caller didn't override it.
+    expect(opts.toDate).toBe('2024-12-31');
+  });
+
+  it('does not apply recency boost when published_date is missing on all results', async () => {
+    // Both URLs have no published_date → multiplier is 1.0 → ordering by rank.
+    const { entry } = makeEntry({
+      name: 'hn',
+      results: [
+        withDate('hn', 'https://a.test/1', undefined),
+        withDate('hn', 'https://b.test/2', undefined),
+      ],
+    });
+    verticalState.news = [entry];
+
+    const out = await runV1Search({ query: 'latest news AI' });
+    expect(out.results.map((r) => r.url)).toEqual([
+      'https://a.test/1',
+      'https://b.test/2',
+    ]);
+  });
+});

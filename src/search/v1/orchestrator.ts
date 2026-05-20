@@ -1,12 +1,12 @@
 import type { RawSearchResult, SearchEngineOptions } from '../../types.js';
 import { createLogger } from '../../logger.js';
-import { classifyIntent, type Vertical } from './intent-router.js';
+import { classifyIntentDetailed, type Vertical } from './intent-router.js';
 import {
   runEnginesParallel,
   type EngineEntry,
   type EngineOutcome,
 } from './engine-base.js';
-import { buildRankMap } from '../rrf.js';
+import { recencyMultiplier, hasTemporalIntent } from './recency-boost.js';
 import { getGeneralEngines, _resetGeneralEnginesForTest } from './verticals/general.js';
 import { getNewsEngines, _resetNewsEnginesForTest } from './verticals/news.js';
 import { getCodeEngines, _resetCodeEnginesForTest } from './verticals/code.js';
@@ -113,8 +113,17 @@ export async function runV1Search(
     };
   }
 
-  const hasDateBound = !!(input.fromDate || input.toDate);
-  const vertical = classifyIntent(query, { hint: input.category, hasDateBound });
+  const callerHasDateBound = !!(input.fromDate || input.toDate);
+  const classification = classifyIntentDetailed(query, {
+    hint: input.category,
+    hasDateBound: callerHasDateBound,
+  });
+  const vertical = classification.vertical;
+  const dateHint = classification.dateHint;
+
+  const effectiveFromDate = input.fromDate ?? dateHint?.fromDate;
+  const effectiveToDate = input.toDate ?? dateHint?.toDate;
+  const hasDateBound = !!(effectiveFromDate || effectiveToDate);
 
   const allEntries = getEntriesForVertical(vertical);
 
@@ -133,8 +142,8 @@ export async function runV1Search(
     language: input.language,
     includeDomains: input.includeDomains,
     excludeDomains: input.excludeDomains,
-    fromDate: input.fromDate,
-    toDate: input.toDate,
+    fromDate: effectiveFromDate,
+    toDate: effectiveToDate,
     category: vertical === 'general' ? undefined : vertical,
   };
 
@@ -146,7 +155,10 @@ export async function runV1Search(
 
   const outcomes = await runEnginesParallel(entries, query, options);
 
-  // Per-engine dedup, then RRF with per-entry weights.
+  const wantsRecency =
+    vertical === 'news' || hasDateBound || hasTemporalIntent(query);
+
+  // Per-engine dedup, then RRF with per-entry weights and optional recency boost.
   const fused = new Map<string, number>();
   const urlToResult = new Map<string, RawSearchResult>();
 
@@ -158,11 +170,12 @@ export async function runV1Search(
     outcome.results = dedupedResults;
 
     const weight = entries[i].weight ?? 1;
-    const rankMap = buildRankMap(dedupedResults.map((r) => r.url));
-    for (const [url, rank] of rankMap) {
-      fused.set(url, (fused.get(url) ?? 0) + weight / (RRF_K + rank));
-    }
-    for (const r of dedupedResults) {
+    for (let j = 0; j < dedupedResults.length; j++) {
+      const r = dedupedResults[j];
+      const rank = j + 1;
+      const base = weight / (RRF_K + rank);
+      const recMul = wantsRecency ? recencyMultiplier(r.published_date) : 1.0;
+      fused.set(r.url, (fused.get(r.url) ?? 0) + base * recMul);
       if (!urlToResult.has(r.url)) {
         urlToResult.set(r.url, r);
       }

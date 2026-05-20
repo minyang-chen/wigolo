@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { classifyIntent, VERTICALS } from '../../../../src/search/v1/intent-router.js';
+import {
+  classifyIntent,
+  classifyIntentDetailed,
+  VERTICALS,
+} from '../../../../src/search/v1/intent-router.js';
+
+const NOW = new Date('2026-05-21T12:00:00.000Z');
+function isoDaysAgo(days: number, now: Date = NOW): string {
+  return new Date(now.getTime() - days * 86_400_000).toISOString().slice(0, 10);
+}
 
 describe('classifyIntent', () => {
   describe('hint override', () => {
@@ -204,6 +213,163 @@ describe('classifyIntent', () => {
   describe('VERTICALS export', () => {
     it('exports all five verticals', () => {
       expect(VERTICALS).toEqual(['general', 'news', 'code', 'docs', 'papers']);
+    });
+  });
+});
+
+describe('classifyIntentDetailed', () => {
+  describe('vertical parity with classifyIntent', () => {
+    const cases: Array<{ q: string; hint?: 'news' | 'code' }> = [
+      { q: 'latest news about react' },
+      { q: 'arxiv paper on transformers' },
+      { q: 'github issue tracker' },
+      { q: 'how to bake sourdough' },
+      { q: 'best pizza in new york' },
+      { q: '' },
+      { q: 'fix python regex bug' },
+      { q: 'latest react tutorial' },
+      { q: 'quantum computing', hint: 'news' },
+    ];
+    for (const c of cases) {
+      it(`matches classifyIntent for "${c.q}"`, () => {
+        const opts = c.hint ? { hint: c.hint } : undefined;
+        const a = classifyIntent(c.q, opts);
+        const b = classifyIntentDetailed(c.q, opts).vertical;
+        expect(b).toBe(a);
+      });
+    }
+  });
+
+  describe('date hint parsing', () => {
+    it('parses "between 2023 and 2024"', () => {
+      const out = classifyIntentDetailed('rust news between 2023 and 2024');
+      expect(out.dateHint).toEqual({
+        fromDate: '2023-01-01',
+        toDate: '2024-12-31',
+      });
+    });
+
+    it('parses "from 2022 to 2025"', () => {
+      const out = classifyIntentDetailed('papers from 2022 to 2025');
+      expect(out.dateHint).toEqual({
+        fromDate: '2022-01-01',
+        toDate: '2025-12-31',
+      });
+    });
+
+    it('parses "since 2021"', () => {
+      const out = classifyIntentDetailed('changes since 2021');
+      expect(out.dateHint).toEqual({ fromDate: '2021-01-01' });
+    });
+
+    it('parses "in 2024"', () => {
+      const out = classifyIntentDetailed('events in 2024');
+      expect(out.dateHint).toEqual({ fromDate: '2024-01-01' });
+    });
+
+    it('parses "after 2023"', () => {
+      const out = classifyIntentDetailed('research after 2023');
+      expect(out.dateHint).toEqual({ fromDate: '2023-01-01' });
+    });
+
+    it('parses "starting 2022"', () => {
+      const out = classifyIntentDetailed('records starting 2022');
+      expect(out.dateHint).toEqual({ fromDate: '2022-01-01' });
+    });
+
+    it('parses "before 2024"', () => {
+      const out = classifyIntentDetailed('history before 2024');
+      expect(out.dateHint).toEqual({ toDate: '2023-12-31' });
+    });
+
+    it('parses "last 30 days"', () => {
+      const out = classifyIntentDetailed('articles last 30 days', { now: NOW });
+      expect(out.dateHint?.fromDate).toBe(isoDaysAgo(30));
+      expect(out.dateHint?.toDate).toBeUndefined();
+    });
+
+    it('parses "last 2 weeks"', () => {
+      const out = classifyIntentDetailed('news last 2 weeks', { now: NOW });
+      expect(out.dateHint?.fromDate).toBe(isoDaysAgo(14));
+    });
+
+    it('parses "last 3 months"', () => {
+      const out = classifyIntentDetailed('updates last 3 months', { now: NOW });
+      expect(out.dateHint?.fromDate).toBe(isoDaysAgo(90));
+    });
+
+    it('parses "last 1 year"', () => {
+      const out = classifyIntentDetailed('releases last 1 year', { now: NOW });
+      expect(out.dateHint?.fromDate).toBe(isoDaysAgo(365));
+    });
+
+    it('parses "past 5 days"', () => {
+      const out = classifyIntentDetailed('news past 5 days', { now: NOW });
+      expect(out.dateHint?.fromDate).toBe(isoDaysAgo(5));
+    });
+
+    it('parses "today"', () => {
+      const out = classifyIntentDetailed('news today', { now: NOW });
+      const todayIso = isoDaysAgo(0);
+      expect(out.dateHint).toEqual({ fromDate: todayIso, toDate: todayIso });
+    });
+
+    it('parses "yesterday"', () => {
+      const out = classifyIntentDetailed('news yesterday', { now: NOW });
+      const y = isoDaysAgo(1);
+      expect(out.dateHint).toEqual({ fromDate: y, toDate: y });
+    });
+
+    it('parses "this week"', () => {
+      const out = classifyIntentDetailed('news this week', { now: NOW });
+      expect(out.dateHint?.fromDate).toBe(isoDaysAgo(7));
+    });
+
+    it('parses "this month"', () => {
+      const out = classifyIntentDetailed('news this month', { now: NOW });
+      expect(out.dateHint?.fromDate).toBe(isoDaysAgo(30));
+    });
+
+    it('parses "this year"', () => {
+      const out = classifyIntentDetailed('news this year', { now: NOW });
+      expect(out.dateHint?.fromDate).toBe('2026-01-01');
+    });
+
+    it('classifies query as news + sets dateHint for "latest rust news between 2023 and 2024"', () => {
+      const out = classifyIntentDetailed('latest rust news between 2023 and 2024');
+      expect(out.vertical).toBe('news');
+      expect(out.dateHint).toEqual({
+        fromDate: '2023-01-01',
+        toDate: '2024-12-31',
+      });
+    });
+
+    it('first pattern wins on multiple patterns in same query', () => {
+      const out = classifyIntentDetailed('between 2023 and 2024 since 2020');
+      expect(out.dateHint).toEqual({
+        fromDate: '2023-01-01',
+        toDate: '2024-12-31',
+      });
+    });
+
+    it('rejects invalid years (1800)', () => {
+      const out = classifyIntentDetailed('history since 1800');
+      expect(out.dateHint).toBeUndefined();
+    });
+
+    it('rejects inverted year ranges', () => {
+      const out = classifyIntentDetailed('between 2024 and 2023');
+      expect(out.dateHint).toBeUndefined();
+    });
+
+    it('returns no hint when no date keywords are present', () => {
+      const out = classifyIntentDetailed('how to bake sourdough');
+      expect(out.dateHint).toBeUndefined();
+    });
+
+    it('returns no hint for empty string', () => {
+      const out = classifyIntentDetailed('');
+      expect(out.dateHint).toBeUndefined();
     });
   });
 });
