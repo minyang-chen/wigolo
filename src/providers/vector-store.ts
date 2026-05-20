@@ -1,9 +1,9 @@
 /**
  * Vector store interface — Phase 1 Task 1.3 of v1 engine overhaul.
  *
- * Wraps the existing in-memory VectorIndex (URL-keyed, cosine similarity,
- * loaded from SQLite on init) behind a stable interface. The factory always
- * returns the legacy adapter today; Phase 6 swaps in a richer v1 store.
+ * Phase 5 switched the default implementation from the in-memory
+ * VectorIndex adapter to the sqlite-vec backed store. The interface is
+ * unchanged so callers do not need to change.
  */
 import { createLogger } from '../logger.js';
 
@@ -44,13 +44,18 @@ let cached: Promise<VectorStore> | null = null;
 
 export function getVectorStore(): Promise<VectorStore> {
   if (cached) return cached;
-  cached = import('../cache/legacy-vector-store.js').then(
-    m => {
-      log.info('vector store ready', { provider: 'vector-store', impl: 'legacy' });
-      return new m.LegacyVectorStore();
-    },
-    err => { cached = null; throw err; },
-  );
+  cached = (async () => {
+    const [{ SqliteVecStore }, { getDatabase }] = await Promise.all([
+      import('../cache/sqlite-vec-store.js'),
+      import('../cache/db.js'),
+    ]);
+    const db = getDatabase();
+    log.info('vector store ready', { provider: 'vector-store', impl: 'sqlite-vec' });
+    return new SqliteVecStore(db);
+  })().catch(err => {
+    cached = null;
+    throw err;
+  });
   return cached;
 }
 
