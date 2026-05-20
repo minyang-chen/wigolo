@@ -58,8 +58,6 @@ class EmbeddingWorker extends PythonWorker<EmbedRequest, EmbedResult> {
     return { id: obj.id, result: { vector: obj.vector ?? [] } };
   }
 
-  protected killOnRequestTimeout(): boolean { return false; }
-
   getDims(): number | null { return this.dims; }
   getModel(): string | null { return this.modelName; }
 }

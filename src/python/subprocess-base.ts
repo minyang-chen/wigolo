@@ -77,7 +77,7 @@ export abstract class PythonWorker<Req, Res> {
     }
     this.resetIdleTimer();
 
-    const id = randomId();
+    const id = randomUUID();
     return new Promise<Res>((resolve, reject) => {
       const timeoutHandle = setTimeout(() => {
         this.pending.delete(id);
@@ -130,8 +130,19 @@ export abstract class PythonWorker<Req, Res> {
     this.proc = proc;
 
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const settledResolve = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const settledReject = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(err);
+      };
       const readyTimeout = setTimeout(() => {
-        reject(new Error(`Python subprocess READY timeout after ${this.readyTimeoutMs}ms`));
+        settledReject(new Error(`Python subprocess READY timeout after ${this.readyTimeoutMs}ms`));
         try { proc.kill(); } catch { /* ignore */ }
       }, this.readyTimeoutMs);
 
@@ -145,17 +156,17 @@ export abstract class PythonWorker<Req, Res> {
             try {
               this.parseReadyLine(line);
               this.available = true;
-              resolve();
+              settledResolve();
             } catch (err) {
               this.available = false;
-              reject(err instanceof Error ? err : new Error(String(err)));
+              settledReject(err instanceof Error ? err : new Error(String(err)));
             }
             return;
           }
           if (line.startsWith('ERROR')) {
             clearTimeout(readyTimeout);
             this.available = false;
-            reject(new Error(`Python subprocess: ${line}`));
+            settledReject(new Error(`Python subprocess: ${line}`));
             return;
           }
         }
@@ -166,7 +177,7 @@ export abstract class PythonWorker<Req, Res> {
         this.available = false;
         this.proc = null;
         this.spawnPromise = null;
-        reject(err);
+        settledReject(err);
       });
 
       proc.on('close', (code) => {
@@ -180,7 +191,11 @@ export abstract class PythonWorker<Req, Res> {
         }
         this.proc = null;
         this.spawnPromise = null;
-        if (code !== 0 && code !== null) reject(exitErr);
+        // Cover the pre-READY exit case (e.g. python script missing, import
+        // error, or any non-zero exit before emitting READY/ERROR). After
+        // the promise has settled (post-READY), settledReject() is a no-op,
+        // so a late close from a healthy subprocess won't re-reject.
+        settledReject(exitErr);
       });
     });
 
@@ -231,8 +246,4 @@ export abstract class PythonWorker<Req, Res> {
       this.shutdown();
     }, this.idleTimeoutMs);
   }
-}
-
-function randomId(): string {
-  return randomUUID();
 }
