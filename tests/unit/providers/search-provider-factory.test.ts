@@ -1,0 +1,40 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { getSearchProvider, _resetSearchProviderForTest } from '../../../src/providers/search-provider.js';
+import { _resetConfigForTest } from '../../../src/config.js';
+import { LegacySearxngProvider } from '../../../src/search/legacy/searxng-provider.js';
+import { V1StubProvider } from '../../../src/search/v1/stub-provider.js';
+
+describe('getSearchProvider', () => {
+  let originalEnv: string | undefined;
+  beforeEach(() => {
+    originalEnv = process.env.WIGOLO_SEARCH;
+    _resetSearchProviderForTest();
+    _resetConfigForTest();
+  });
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env.WIGOLO_SEARCH;
+    else process.env.WIGOLO_SEARCH = originalEnv;
+    _resetSearchProviderForTest();
+    _resetConfigForTest();
+  });
+
+  it('returns LegacySearxngProvider by default', async () => {
+    delete process.env.WIGOLO_SEARCH;
+    expect(await getSearchProvider()).toBeInstanceOf(LegacySearxngProvider);
+  });
+
+  it('returns LegacySearxngProvider when WIGOLO_SEARCH=searxng', async () => {
+    process.env.WIGOLO_SEARCH = 'searxng';
+    expect(await getSearchProvider()).toBeInstanceOf(LegacySearxngProvider);
+  });
+
+  it('returns V1StubProvider when WIGOLO_SEARCH=v1', async () => {
+    process.env.WIGOLO_SEARCH = 'v1';
+    expect(await getSearchProvider()).toBeInstanceOf(V1StubProvider);
+  });
+
+  it('rejects on unknown value', async () => {
+    process.env.WIGOLO_SEARCH = 'tavily';
+    await expect(getSearchProvider()).rejects.toThrow(/WIGOLO_SEARCH/);
+  });
+});

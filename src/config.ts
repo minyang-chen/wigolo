@@ -66,6 +66,7 @@ export interface Config {
   llmProvider: string | null;
   llmCacheTtlDays: number;
   llmMaxCallsPerRequest: number;
+  searchProvider: 'v1' | 'searxng';
 }
 
 function envStr(key: string, fallback: string | null = null): string | null {
@@ -178,11 +179,23 @@ export function getConfig(): Config {
     llmProvider: envStr('WIGOLO_LLM_PROVIDER'),
     llmCacheTtlDays: envInt('WIGOLO_LLM_CACHE_TTL_DAYS', 7),
     llmMaxCallsPerRequest: envInt('WIGOLO_LLM_MAX_CALLS_PER_REQUEST', 1),
+    searchProvider: (() => {
+      const raw = envStr('WIGOLO_SEARCH', 'searxng');
+      return raw === 'v1' ? 'v1' : raw === 'searxng' ? 'searxng' : 'searxng';
+    })(),
   };
 
   return cachedConfig;
 }
 
 export function resetConfig(): void {
+  cachedConfig = null;
+}
+
+/**
+ * Alias of `resetConfig` used by the provider-factory tests. Kept distinct so
+ * test imports read clearly without renaming the existing widely-used helper.
+ */
+export function _resetConfigForTest(): void {
   cachedConfig = null;
 }
