@@ -1,6 +1,7 @@
 import { createLogger } from '../logger.js';
 import { decomposeQuestion, detectQueryType, extractComparisonEntities, type QueryType } from './decompose.js';
 import { synthesizeReport } from './synthesize.js';
+import { synthesizeLocal } from './synthesis-local.js';
 import { buildResearchBrief } from './brief.js';
 import { deduplicateResults } from '../search/dedup.js';
 import { rerankResults } from '../search/rerank.js';
@@ -11,11 +12,13 @@ import { truncateSmartly } from '../search/truncate.js';
 import { cacheContent } from '../cache/store.js';
 import { getEmbeddingService } from '../embedding/embed.js';
 import { checkSamplingSupport, type SamplingCapableServer } from '../search/sampling.js';
+import { isLocalLlmEnabled } from '../extraction/v1/local-llm.js';
 import type {
   ResearchInput,
   ResearchOutput,
   ResearchSource,
   SearchEngine,
+  Citation,
 } from '../types.js';
 import type { SmartRouter } from '../fetch/router.js';
 
@@ -111,6 +114,41 @@ export async function runResearchPipeline(
     );
     log.info('synthesis complete', { samplingUsed: synthesisResult.samplingUsed, reportLength: synthesisResult.report.length });
 
+    // Phase 5b: Local-LLM synthesis fallback — only when host LLM did not
+    // produce output AND a local provider is configured. Failures fall through
+    // to the existing heuristic report in synthesisResult.
+    let finalReport = synthesisResult.report;
+    let finalCitations: Citation[] = synthesisResult.citations;
+    let localSynthesisText: string | undefined;
+    if (!synthesisResult.samplingUsed && isLocalLlmEnabled()) {
+      try {
+        const localSources = sources
+          .filter((s) => s.fetched && s.markdown_content.length > 0)
+          .map((s) => ({ url: s.url, title: s.title, markdown: s.markdown_content }));
+        if (localSources.length > 0) {
+          const local = await synthesizeLocal(input.question, localSources);
+          finalReport = local.text;
+          localSynthesisText = local.text;
+          finalCitations = local.citations
+            .filter((idx) => idx >= 0 && idx < localSources.length)
+            .map((idx) => {
+              const s = localSources[idx];
+              return {
+                index: idx + 1,
+                url: s.url,
+                title: s.title,
+                snippet: s.markdown.slice(0, 200),
+              };
+            });
+          log.info('local synthesis succeeded', { reportLength: finalReport.length });
+        }
+      } catch (err) {
+        log.warn('local LLM synthesis failed; using heuristic fallback', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     // Phase 6: Structured brief — populated when internal sampling is
     // unavailable so the host LLM has well-shaped data to write the report
     // from without re-reading raw markdown.
@@ -126,12 +164,13 @@ export async function runResearchPipeline(
           TOTAL_SOURCES_CHAR_CAP,
           queryType,
           comparisonEntities,
+          localSynthesisText,
         )
       : undefined;
 
     return {
-      report: synthesisResult.report,
-      citations: synthesisResult.citations,
+      report: finalReport,
+      citations: finalCitations,
       sources,
       sub_queries: subQueries,
       depth,

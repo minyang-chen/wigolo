@@ -148,6 +148,32 @@ describe('buildResearchBrief', () => {
     expect(brief.sections.comparison).toBeUndefined();
   });
 
+  it('populates citation_graph when synthesisText is provided', async () => {
+    const sources = [
+      mkSource({ url: 'https://a.com', markdown_content: 'server components render efficiently on server' }),
+      mkSource({ url: 'https://b.com', markdown_content: 'streaming SSR flushes chunks progressively' }),
+    ];
+    const brief = await buildResearchBrief(
+      'q',
+      sources,
+      [],
+      3000,
+      40000,
+      'general',
+      [],
+      'Server components are fast [1]. Streaming is great [2].',
+    );
+    expect(brief.citation_graph).toBeDefined();
+    expect(brief.citation_graph!.length).toBeGreaterThan(0);
+    expect(brief.citation_graph![0].source_indices).toEqual([0]);
+    expect(brief.citation_graph![0].confidence).toBe('high');
+  });
+
+  it('omits citation_graph when synthesisText is empty', async () => {
+    const brief = await buildResearchBrief('q', [mkSource()], [], 3000, 40000, 'general', [], '');
+    expect(brief.citation_graph).toBeUndefined();
+  });
+
   it('detects gaps when sub-queries have no source coverage', async () => {
     const sources = [
       mkSource({ markdown_content: 'This source talks about Python and Django web development exclusively.' }),

@@ -327,6 +327,12 @@ export interface CrossReference {
   confidence: 'high' | 'medium';
 }
 
+export interface CitationGraphEntry {
+  claim: string;
+  source_indices: number[];
+  confidence: 'high' | 'medium' | 'low';
+}
+
 export interface ResearchBrief {
   topics: string[];
   highlights: Highlight[];
@@ -345,6 +351,7 @@ export interface ResearchBrief {
     gaps: string[];
   };
   query_type: 'comparison' | 'how-to' | 'concept' | 'general';
+  citation_graph?: CitationGraphEntry[];
 }
 
 // --- Agent tool types (v3) ---
