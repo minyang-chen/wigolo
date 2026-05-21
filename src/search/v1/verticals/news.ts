@@ -1,5 +1,6 @@
 import { HnAlgoliaEngine } from '../../engines/hn-algolia.js';
 import { LobstersEngine } from '../../engines/lobsters.js';
+import { BingNewsEngine } from '../../engines/bing-news.js';
 import { wrapWithRetryAndBreaker, type EngineEntry } from '../engine-base.js';
 import { RssFeedEngine } from '../rss/rss-engine.js';
 import { loadFeedConfig } from '../rss/feed-config.js';
@@ -37,6 +38,10 @@ export function getNewsEngines(): EngineEntry[] {
     // Lobsters /search.json has no native date filter; engine applies client-side
     // filtering. Mark false so the orchestrator treats it as date-naive.
     { engine: wrapWithRetryAndBreaker(new LobstersEngine()), weight: 1.0, supportsDateFilter: false },
+    // Bing News widens reach beyond HN/Lobsters' tech-only feed. The engine
+    // scrapes /search?filters=tnews and surfaces .news_dt → published_date so
+    // the recency layer can rank it like the other date-aware engines.
+    { engine: wrapWithRetryAndBreaker(new BingNewsEngine()), weight: 0.9, supportsDateFilter: false },
   ];
 
   if (hasRssConfigured()) {

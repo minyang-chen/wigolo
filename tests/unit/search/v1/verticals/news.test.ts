@@ -44,13 +44,20 @@ describe('getNewsEngines', () => {
     }
   });
 
-  it('returns two entries when no RSS configured and feed store empty', () => {
-    expect(getNewsEngines()).toHaveLength(2);
+  it('returns three entries when no RSS configured and feed store empty', () => {
+    expect(getNewsEngines()).toHaveLength(3);
   });
 
-  it('wraps hn-algolia and lobsters engines (preserving names)', () => {
+  it('wraps hn-algolia, lobsters, and bing_news engines (preserving names)', () => {
     const names = getNewsEngines().map((e) => e.engine.name);
-    expect(names).toEqual(['hn-algolia', 'lobsters']);
+    expect(names).toEqual(['hn-algolia', 'lobsters', 'bing_news']);
+  });
+
+  it('weights bing_news lower than HN/lobsters (broader but noisier source)', () => {
+    const entries = getNewsEngines();
+    const bn = entries.find((e) => e.engine.name === 'bing_news');
+    const hn = entries.find((e) => e.engine.name === 'hn-algolia');
+    expect(bn?.weight).toBeLessThan(hn?.weight ?? Infinity);
   });
 
   it('memoizes — two calls return the same array reference', () => {
