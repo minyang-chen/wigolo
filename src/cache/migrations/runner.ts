@@ -96,19 +96,55 @@ export const MIGRATIONS: Migration[] = [
   { name: '003-crawl-etags', sql: MIGRATION_003_CRAWL_ETAGS },
 ];
 
+function isReadOnlyError(err: unknown): boolean {
+  if (!err) return false;
+  const code = (err as { code?: string }).code;
+  if (code === 'SQLITE_READONLY' || code === 'SQLITE_READONLY_DBMOVED') return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /SQLITE_READONLY|attempt to write a readonly|readonly database/i.test(msg);
+}
+
+// Process-lifetime guard: once we have seen a read-only DB we stop retrying
+// migrations for the rest of the process. Without this, each
+// initDatabase() in a single CLI invocation (eg. doctor's two checks) would
+// re-attempt every pending migration and emit the same error twice.
+let readOnlyWarned = false;
+
+/** Test-only: reset the module-level read-only guard between cases. */
+export function _resetMigrationGuard(): void {
+  readOnlyWarned = false;
+}
+
 /**
  * Apply pending migrations in order. Idempotent — already-applied migrations
  * are skipped via the schema_migrations table. Migrations marked
  * `requiresVec: true` are skipped when the sqlite-vec extension is absent so
  * FTS5-only flows still work on platforms without the native extension.
+ * On a read-only database, logs a single warning and stops; subsequent
+ * calls in the same process are no-ops.
  */
 export function applyMigrations(db: Database.Database, opts: { vecLoaded: boolean } = { vecLoaded: true }): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      name TEXT PRIMARY KEY,
-      applied_at INTEGER NOT NULL
-    )
-  `);
+  if (readOnlyWarned) {
+    return;
+  }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        name TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+  } catch (err) {
+    if (isReadOnlyError(err)) {
+      readOnlyWarned = true;
+      log.warn('database is read-only — skipping migrations for this process', {
+        cause: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    throw err;
+  }
 
   const appliedRows = db.prepare('SELECT name FROM schema_migrations').all() as Array<{ name: string }>;
   const applied = new Set(appliedRows.map(r => r.name));
@@ -128,6 +164,14 @@ export function applyMigrations(db: Database.Database, opts: { vecLoaded: boolea
       })();
       log.info('migration applied', { name: migration.name });
     } catch (err) {
+      if (isReadOnlyError(err)) {
+        readOnlyWarned = true;
+        log.warn('database is read-only — skipping remaining migrations for this process', {
+          name: migration.name,
+          cause: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
       log.error('migration failed', {
         name: migration.name,
         error: err instanceof Error ? err.message : String(err),
