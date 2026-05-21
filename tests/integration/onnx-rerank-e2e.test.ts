@@ -9,27 +9,21 @@ import type {
   RerankCandidate,
 } from '../../src/providers/rerank-provider.js';
 
-vi.mock('../../src/extraction/pipeline.js', () => ({
-  extractContent: vi.fn().mockResolvedValue({
-    title: 'mock',
-    markdown: '# mock',
-    metadata: {},
-    links: [],
-    images: [],
-    extractor: 'defuddle' as const,
-  }),
-}));
-vi.mock('../../src/providers/extract-provider.js', async () => {
-  const pipeline = await import('../../src/extraction/pipeline.js');
-  return {
-    getExtractProvider: vi.fn(async () => ({
-      name: 'v1' as const,
-      extract: (html: string, url: string, opts?: unknown) =>
-        (pipeline as { extractContent: (...a: unknown[]) => unknown }).extractContent(html, url, opts),
-    })),
-    _resetExtractProviderForTest: vi.fn(),
-  };
+const extractMock = vi.fn().mockResolvedValue({
+  title: 'mock',
+  markdown: '# mock',
+  metadata: {},
+  links: [],
+  images: [],
+  extractor: 'defuddle' as const,
 });
+vi.mock('../../src/providers/extract-provider.js', () => ({
+  getExtractProvider: vi.fn(async () => ({
+    name: 'v1' as const,
+    extract: extractMock,
+  })),
+  _resetExtractProviderForTest: vi.fn(),
+}));
 
 
 // Mock rerank provider so the test runs without downloading the model.

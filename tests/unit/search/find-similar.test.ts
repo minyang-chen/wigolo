@@ -7,27 +7,21 @@ import { cacheContent } from '../../../src/cache/store.js';
 import type { RawFetchResult, ExtractionResult } from '../../../src/types.js';
 
 // Mock the extraction pipeline to avoid Playwright dependency
-vi.mock('../../../src/extraction/pipeline.js', () => ({
-  extractContent: vi.fn().mockResolvedValue({
-    title: 'Mock Title',
-    markdown: '# Mock Content\n\nSome extracted content here.',
-    metadata: {},
-    links: [],
-    images: [],
-    extractor: 'defuddle' as const,
-  }),
-}));
-vi.mock('../../../src/providers/extract-provider.js', async () => {
-  const pipeline = await import('../../../src/extraction/pipeline.js');
-  return {
-    getExtractProvider: vi.fn(async () => ({
-      name: 'v1' as const,
-      extract: (html: string, url: string, opts?: unknown) =>
-        (pipeline as { extractContent: (...a: unknown[]) => unknown }).extractContent(html, url, opts),
-    })),
-    _resetExtractProviderForTest: vi.fn(),
-  };
+const extractMock = vi.fn().mockResolvedValue({
+  title: 'Mock Title',
+  markdown: '# Mock Content\n\nSome extracted content here.',
+  metadata: {},
+  links: [],
+  images: [],
+  extractor: 'defuddle' as const,
 });
+vi.mock('../../../src/providers/extract-provider.js', () => ({
+  getExtractProvider: vi.fn(async () => ({
+    name: 'v1' as const,
+    extract: extractMock,
+  })),
+  _resetExtractProviderForTest: vi.fn(),
+}));
 
 
 // Import after mocks

@@ -13,20 +13,14 @@ vi.mock('../../../../src/config.js', () => ({
   getConfig: vi.fn(() => ({})),
 }));
 
-vi.mock('../../../../src/extraction/pipeline.js', () => ({
-  extractContent: vi.fn(),
+const extractMock = vi.fn();
+vi.mock('../../../../src/providers/extract-provider.js', () => ({
+  getExtractProvider: vi.fn(async () => ({
+    name: 'v1' as const,
+    extract: extractMock,
+  })),
+  _resetExtractProviderForTest: vi.fn(),
 }));
-vi.mock('../../../../src/providers/extract-provider.js', async () => {
-  const pipeline = await import('../../../../src/extraction/pipeline.js');
-  return {
-    getExtractProvider: vi.fn(async () => ({
-      name: 'v1' as const,
-      extract: (html: string, url: string, opts?: unknown) =>
-        (pipeline as { extractContent: (...a: unknown[]) => unknown }).extractContent(html, url, opts),
-    })),
-    _resetExtractProviderForTest: vi.fn(),
-  };
-});
 
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -41,11 +35,10 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 import { readFileSync, existsSync } from 'node:fs';
-import { extractContent } from '../../../../src/extraction/pipeline.js';
 
 const mockReadFileSync = vi.mocked(readFileSync);
 const mockExistsSync = vi.mocked(existsSync);
-const mockExtractContent = vi.mocked(extractContent);
+const mockExtractContent = extractMock;
 
 const sampleManifest: Manifest = {
   version: '1.0.0',

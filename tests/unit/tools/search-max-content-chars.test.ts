@@ -4,27 +4,21 @@ import type { SmartRouter } from '../../../src/fetch/router.js';
 import { resetConfig } from '../../../src/config.js';
 import { initDatabase, closeDatabase } from '../../../src/cache/db.js';
 
-vi.mock('../../../src/extraction/pipeline.js', () => ({
-  extractContent: vi.fn().mockResolvedValue({
-    title: 'Mock',
-    markdown: 'a'.repeat(3000) + '\n\n' + 'b'.repeat(10000),
-    metadata: {},
-    links: [],
-    images: [],
-    extractor: 'defuddle' as const,
-  }),
-}));
-vi.mock('../../../src/providers/extract-provider.js', async () => {
-  const pipeline = await import('../../../src/extraction/pipeline.js');
-  return {
-    getExtractProvider: vi.fn(async () => ({
-      name: 'v1' as const,
-      extract: (html: string, url: string, opts?: unknown) =>
-        (pipeline as { extractContent: (...a: unknown[]) => unknown }).extractContent(html, url, opts),
-    })),
-    _resetExtractProviderForTest: vi.fn(),
-  };
+const extractMock = vi.fn().mockResolvedValue({
+  title: 'Mock',
+  markdown: 'a'.repeat(3000) + '\n\n' + 'b'.repeat(10000),
+  metadata: {},
+  links: [],
+  images: [],
+  extractor: 'defuddle' as const,
 });
+vi.mock('../../../src/providers/extract-provider.js', () => ({
+  getExtractProvider: vi.fn(async () => ({
+    name: 'v1' as const,
+    extract: extractMock,
+  })),
+  _resetExtractProviderForTest: vi.fn(),
+}));
 
 
 const { handleSearch } = await import('../../../src/tools/search.js');
@@ -71,8 +65,7 @@ describe('max_content_chars — search', () => {
   });
 
   it('leaves shorter content unchanged', async () => {
-    const { extractContent } = await import('../../../src/extraction/pipeline.js');
-    vi.mocked(extractContent).mockResolvedValueOnce({
+    extractMock.mockResolvedValueOnce({
       title: 'Short', markdown: 'short content', metadata: {}, links: [], images: [],
       extractor: 'defuddle' as const,
     });
@@ -108,8 +101,7 @@ describe('max_content_chars — fetch', () => {
   });
 
   it('truncates fetch markdown to max_content_chars', async () => {
-    const { extractContent } = await import('../../../src/extraction/pipeline.js');
-    vi.mocked(extractContent).mockResolvedValueOnce({
+    extractMock.mockResolvedValueOnce({
       title: 'Long', markdown: 'x'.repeat(10000), metadata: {}, links: [], images: [],
       extractor: 'defuddle' as const,
     });
