@@ -16,10 +16,40 @@ vi.mock('../../../src/providers/rerank-provider.js', () => ({
     rerank: vi.fn().mockResolvedValue([{ id: '0', score: 0.9 }]),
   })),
 }));
+vi.mock('../../../src/providers/embed-provider.js', () => ({
+  getEmbedProvider: vi.fn(async () => ({
+    modelId: 'BAAI/bge-small-en-v1.5',
+    dim: 384,
+    embed: vi.fn(),
+  })),
+}));
+vi.mock('../../../src/cache/db.js', () => {
+  const db = {
+    prepare: vi.fn((sql: string) => {
+      if (typeof sql === 'string' && sql.includes('vec_version')) {
+        return { get: vi.fn(() => ({ v: '0.1.7-alpha.2' })) };
+      }
+      // feed_items lookup — default to empty.
+      return { get: vi.fn(() => ({ n: 0, last_at: null })) };
+    }),
+  };
+  return {
+    initDatabase: vi.fn(() => db),
+    closeDatabase: vi.fn(),
+    getDatabase: vi.fn(() => db),
+    isVecExtensionLoaded: vi.fn(() => true),
+  };
+});
+vi.mock('../../../src/search/v1/rss/feed-config.js', () => ({
+  loadFeedConfig: vi.fn(() => ({ feeds: [], sources: [] })),
+}));
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { runDoctor } from '../../../src/cli/doctor.js';
+import { getEmbedProvider } from '../../../src/providers/embed-provider.js';
+import { initDatabase } from '../../../src/cache/db.js';
+import { loadFeedConfig } from '../../../src/search/v1/rss/feed-config.js';
 
 function okProc(stdout = ''): ReturnType<typeof spawnSync> {
   return { status: 0, stdout, stderr: '', signal: null, pid: 1, output: [], error: undefined } as ReturnType<typeof spawnSync>;
@@ -150,6 +180,103 @@ describe('runDoctor', () => {
       expect(outBuffer).toMatch(/WIGOLO_LLM_PROVIDER=gemini/);
       expect(outBuffer).toMatch(/cache TTL:\s+14 days/);
       expect(outBuffer).toMatch(/per-request:\s+3 call/);
+    });
+  });
+
+  describe('V1 extension checks', () => {
+    beforeEach(() => {
+      vi.mocked(spawnSync).mockImplementation(() => okProc('Python 3.12.4'));
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockImplementation((p) => {
+        const s = String(p);
+        if (s.endsWith('state.json')) return JSON.stringify({ status: 'ready', searxngPath: '/tmp/sx' });
+        if (s.endsWith('searxng.lock')) return JSON.stringify({ pid: process.pid, port: 8888 });
+        return '';
+      });
+    });
+
+    it('reports embedding provider ready with model id and dim', async () => {
+      await runDoctor('/tmp/.wigolo');
+      expect(outBuffer).toMatch(/V1 embeddings:/);
+      expect(outBuffer).toMatch(/provider:\s+ready \(fastembed BAAI\/bge-small-en-v1\.5, dim=384\)/);
+    });
+
+    it('reports embedding provider not ready on failure', async () => {
+      vi.mocked(getEmbedProvider).mockRejectedValueOnce(new Error('model download failed'));
+      await runDoctor('/tmp/.wigolo');
+      expect(outBuffer).toMatch(/provider:\s+not ready \(model download failed\)/);
+      // Failure must not flip overall to DEGRADED on its own.
+      expect(outBuffer).toMatch(/Overall: OK/);
+    });
+
+    it('reports sqlite-vec extension loaded with version', async () => {
+      await runDoctor('/tmp/.wigolo');
+      expect(outBuffer).toMatch(/V1 sqlite-vec:/);
+      expect(outBuffer).toMatch(/extension:\s+loaded \(vec_version 0\.1\.7-alpha\.2\)/);
+    });
+
+    it('reports sqlite-vec extension not loaded when vec_version throws', async () => {
+      vi.mocked(initDatabase).mockReturnValueOnce({
+        prepare: () => ({ get: () => { throw new Error('no such function: vec_version'); } }),
+      } as unknown as ReturnType<typeof initDatabase>);
+      await runDoctor('/tmp/.wigolo');
+      expect(outBuffer).toMatch(/extension:\s+not loaded/);
+      expect(outBuffer).toMatch(/Overall: OK/);
+    });
+
+    it('reports no RSS feeds when none configured', async () => {
+      await runDoctor('/tmp/.wigolo');
+      expect(outBuffer).toMatch(/RSS feeds:/);
+      expect(outBuffer).toMatch(/feeds:\s+none configured \(set WIGOLO_RSS_FEEDS to opt in\)/);
+    });
+
+    it('reports configured feeds with item counts and freshness', async () => {
+      const fresh = new Date(Date.now() - 3 * 3600_000).toISOString();
+      const stale = new Date(Date.now() - 30 * 3600_000).toISOString();
+      vi.mocked(loadFeedConfig).mockReturnValueOnce({
+        feeds: [
+          { url: 'https://example.com/rss' },
+          { url: 'https://stale.example/feed' },
+          { url: 'https://empty.example/feed' },
+        ],
+        sources: ['env'],
+      });
+      const feedDb = {
+        prepare: (sql: string) => {
+          if (sql.includes('vec_version')) {
+            return { get: () => ({ v: '0.1.7-alpha.2' }) };
+          }
+          return {
+            get: (url: string) => {
+              if (url === 'https://example.com/rss') return { n: 3, last_at: fresh };
+              if (url === 'https://stale.example/feed') return { n: 12, last_at: stale };
+              return { n: 0, last_at: null };
+            },
+          };
+        },
+      };
+      vi.mocked(initDatabase).mockReturnValue(feedDb as unknown as ReturnType<typeof initDatabase>);
+
+      await runDoctor('/tmp/.wigolo');
+      expect(outBuffer).toMatch(/https:\/\/example\.com\/rss\s+3 items.*\[fresh\]/);
+      expect(outBuffer).toMatch(/https:\/\/stale\.example\/feed\s+12 items.*\[stale\]/);
+      expect(outBuffer).toMatch(/https:\/\/empty\.example\/feed\s+0 items \[never polled\]/);
+    });
+
+    it('reports telemetry disabled by default', async () => {
+      delete process.env.WIGOLO_TELEMETRY;
+      await runDoctor('/tmp/.wigolo');
+      expect(outBuffer).toMatch(/Telemetry: opt-in disabled \(WIGOLO_TELEMETRY=1/);
+    });
+
+    it('reports telemetry enabled when WIGOLO_TELEMETRY=1', async () => {
+      process.env.WIGOLO_TELEMETRY = '1';
+      try {
+        await runDoctor('/tmp/.wigolo');
+      } finally {
+        delete process.env.WIGOLO_TELEMETRY;
+      }
+      expect(outBuffer).toMatch(/Telemetry: opt-in enabled/);
     });
   });
 });

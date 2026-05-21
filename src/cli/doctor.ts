@@ -5,6 +5,10 @@ import { getBootstrapState, type BootstrapState } from '../searxng/bootstrap.js'
 import { isProcessAlive } from '../searxng/process.js';
 import { getConfig } from '../config.js';
 import { getRerankProvider } from '../providers/rerank-provider.js';
+import { getEmbedProvider } from '../providers/embed-provider.js';
+import { initDatabase, closeDatabase } from '../cache/db.js';
+import { loadFeedConfig } from '../search/v1/rss/feed-config.js';
+import { isTelemetryEnabled } from './telemetry.js';
 import { allProviders, providerEnvVar } from '../integrations/cloud/llm/select.js';
 
 function out(line = ''): void { process.stderr.write(`${line}\n`); }
@@ -209,7 +213,119 @@ export async function runDoctor(dataDir: string): Promise<number> {
     out(`  - Force retry now: npx @staticn0va/wigolo warmup --force`);
   }
 
+  await checkV1Embeddings();
+  await checkSqliteVec(dataDir);
+  checkRssFeeds(dataDir);
+  checkTelemetryStatus();
+
   out('');
   out(`[wigolo doctor] Overall: ${degraded ? 'DEGRADED' : 'OK'}`);
   return degraded ? 1 : 0;
+}
+
+async function checkV1Embeddings(): Promise<void> {
+  out('');
+  out('[wigolo doctor] V1 embeddings:');
+  try {
+    const provider = await getEmbedProvider();
+    out(`  provider:      ready (fastembed ${provider.modelId}, dim=${provider.dim})`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    out(`  provider:      not ready (${msg.slice(0, 80)})`);
+  }
+}
+
+async function checkSqliteVec(dataDir: string): Promise<void> {
+  out('');
+  out('[wigolo doctor] V1 sqlite-vec:');
+  let opened = false;
+  try {
+    const db = initDatabase(join(dataDir, 'wigolo.db'));
+    opened = true;
+    try {
+      const row = db.prepare('SELECT vec_version() AS v').get() as { v?: string } | undefined;
+      const v = row?.v ?? 'unknown';
+      out(`  extension:     loaded (vec_version ${v})`);
+    } catch {
+      out('  extension:     not loaded (run warmup to load on next start)');
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    out(`  extension:     (check failed: ${msg.slice(0, 80)})`);
+  } finally {
+    if (opened) {
+      try { closeDatabase(); } catch { /* ignore */ }
+    }
+  }
+}
+
+function checkRssFeeds(dataDir: string): void {
+  out('');
+  out('[wigolo doctor] RSS feeds:');
+  try {
+    const { feeds } = loadFeedConfig({ dataDir });
+    if (feeds.length === 0) {
+      out('  feeds:         none configured (set WIGOLO_RSS_FEEDS to opt in)');
+      return;
+    }
+
+    let db: ReturnType<typeof initDatabase> | null = null;
+    try {
+      db = initDatabase(join(dataDir, 'wigolo.db'));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      out(`  feeds:         ${feeds.length} configured (db unreadable: ${msg.slice(0, 60)})`);
+      return;
+    }
+
+    let stmt: ReturnType<typeof db.prepare> | null = null;
+    try {
+      stmt = db.prepare(
+        'SELECT COUNT(*) AS n, MAX(fetched_at) AS last_at FROM feed_items WHERE feed_url = ?',
+      );
+    } catch {
+      // feed_items table missing — treat every feed as never polled.
+    }
+
+    const now = Date.now();
+    for (const feed of feeds) {
+      let line: string;
+      if (!stmt) {
+        line = `  ${feed.url}  0 items [never polled]`;
+      } else {
+        try {
+          const row = stmt.get(feed.url) as { n?: number; last_at?: string | null } | undefined;
+          const n = row?.n ?? 0;
+          const lastAt = row?.last_at ?? null;
+          if (!lastAt) {
+            line = `  ${feed.url}  ${n} items [never polled]`;
+          } else {
+            const ageMs = now - new Date(lastAt).getTime();
+            const ageHr = ageMs / 3_600_000;
+            const fresh = ageHr <= 24 ? 'fresh' : 'stale';
+            const ageLabel = ageHr < 1
+              ? `${Math.max(0, Math.round(ageMs / 60_000))}m ago`
+              : `${Math.round(ageHr)}h ago`;
+            const day = lastAt.slice(0, 10);
+            line = `  ${feed.url}  ${n} items, last fetched ${day} (${ageLabel}) [${fresh}]`;
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          line = `  ${feed.url}  (check failed: ${msg.slice(0, 60)})`;
+        }
+      }
+      out(line);
+    }
+
+    try { closeDatabase(); } catch { /* ignore */ }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    out(`  (check failed: ${msg.slice(0, 80)})`);
+  }
+}
+
+function checkTelemetryStatus(): void {
+  out('');
+  const state = isTelemetryEnabled() ? 'enabled' : 'disabled';
+  out(`[wigolo doctor] Telemetry: opt-in ${state} (WIGOLO_TELEMETRY=1 to opt in)`);
 }
