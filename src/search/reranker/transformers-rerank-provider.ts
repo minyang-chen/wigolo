@@ -31,6 +31,23 @@ interface LogitsTensor {
   dims: number[];
 }
 
+// Recognize the noisy huggingface fetch failure signature and replace it
+// with an actionable instruction. Transformers.js parses a config that
+// failed to download, then dereferences `tokenizer_class` on undefined.
+function wrapLoadError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  const looksLikeMissingModel =
+    /tokenizer_class|tokenizer_config|preprocessor_config|fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ENETUNREACH/i.test(
+      message,
+    );
+  if (looksLikeMissingModel) {
+    return new Error(
+      `Reranker model not downloaded — run \`wigolo warmup\` (cause: ${message})`,
+    );
+  }
+  return new Error(`Failed to load reranker model: ${message}`);
+}
+
 export class TransformersRerankProvider implements RerankProvider {
   private tokenizer: Tokenizer | null = null;
   private model: Model | null = null;
@@ -66,9 +83,9 @@ export class TransformersRerankProvider implements RerankProvider {
         this.model = model;
         return { tokenizer, model };
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         this.loadPromise = null;
-        throw err;
+        throw wrapLoadError(err);
       });
 
     return this.loadPromise;
