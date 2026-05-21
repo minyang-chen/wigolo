@@ -12,6 +12,7 @@ import { runInit } from './cli/init.js';
 import { runUninstall } from './cli/uninstall.js';
 import { runSetupMcp } from './cli/setup-mcp.js';
 import { runStatus } from './cli/status.js';
+import { printHelp, printVersion, printUnknownCommand } from './cli/help.js';
 import { getConfig } from './config.js';
 import { startServer } from './server.js';
 
@@ -78,6 +79,21 @@ switch (command) {
     process.exit(code);
     break;
   }
+
+  case 'help':
+    printHelp();
+    process.exit(0);
+    break;
+
+  case 'version':
+    printVersion();
+    process.exit(0);
+    break;
+
+  case 'unknown':
+    printUnknownCommand(args[0] ?? '');
+    process.exit(1);
+    break;
 
   case 'mcp': {
     const config = getConfig();
