@@ -2,11 +2,11 @@
 // (markdown / prose) without a JSON schema constraint — used by research +
 // agent synthesis. The JSON-schema adapters in anthropic.ts/openai.ts/etc.
 // stay for extract's structured path.
+//
+// SDKs are imported lazily inside each adapter so module-load is cheap;
+// otherwise pulling in all four cloud SDKs at boot adds hundreds of ms to
+// MCP server startup (caught by the cold-start e2e timing test).
 
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
-import Groq from 'groq-sdk';
-import { GoogleGenAI } from '@google/genai';
 import type { LLMProvider } from './types.js';
 
 export interface TextCallOpts {
@@ -26,6 +26,7 @@ export interface TextCallResult {
 const DEFAULT_MAX_TOKENS = 2000;
 
 export async function callAnthropicText(opts: TextCallOpts, apiKey: string): Promise<TextCallResult> {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey });
   const start = Date.now();
   const response = await client.messages.create(
@@ -49,6 +50,7 @@ export async function callAnthropicText(opts: TextCallOpts, apiKey: string): Pro
 }
 
 export async function callOpenAIText(opts: TextCallOpts, apiKey: string): Promise<TextCallResult> {
+  const { default: OpenAI } = await import('openai');
   const client = new OpenAI({ apiKey });
   const start = Date.now();
   const response = await client.chat.completions.create(
@@ -72,6 +74,7 @@ export async function callOpenAIText(opts: TextCallOpts, apiKey: string): Promis
 }
 
 export async function callGeminiText(opts: TextCallOpts, apiKey: string): Promise<TextCallResult> {
+  const { GoogleGenAI } = await import('@google/genai');
   const client = new GoogleGenAI({ apiKey });
   const start = Date.now();
   const response = await client.models.generateContent({
@@ -93,6 +96,7 @@ export async function callGeminiText(opts: TextCallOpts, apiKey: string): Promis
 }
 
 export async function callGroqText(opts: TextCallOpts, apiKey: string): Promise<TextCallResult> {
+  const { default: Groq } = await import('groq-sdk');
   const client = new Groq({ apiKey });
   const start = Date.now();
   const response = await client.chat.completions.create(
