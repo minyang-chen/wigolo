@@ -128,7 +128,7 @@ describe('search v1 pipeline — factory + provider integration', () => {
   it('factory resolves to CoreSearchProvider when WIGOLO_SEARCH=v1', async () => {
     const provider = await getSearchProvider();
     expect(provider).toBeInstanceOf(CoreSearchProvider);
-    expect(provider.name).toBe('v1');
+    expect(provider.name).toBe('core');
   });
 
   it('runs a general-vertical query and returns populated results via factory', async () => {

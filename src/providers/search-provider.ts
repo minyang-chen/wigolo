@@ -23,7 +23,7 @@ export interface SearchContext {
 export interface SearchProvider {
   search(input: SearchInput, ctx: SearchContext): Promise<StageResult<SearchOutput>>;
   /** Best-effort name for telemetry/logging. */
-  readonly name: 'core' | 'searxng';
+  readonly name: 'core' | 'searxng' | 'hybrid';
 }
 
 let cached: Promise<SearchProvider> | null = null;
