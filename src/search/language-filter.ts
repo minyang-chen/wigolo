@@ -134,11 +134,14 @@ export function filterByLanguage<T extends RawLike>(
 }
 
 // Apply filterByLanguage but recover when the filter empties a non-empty raw
-// set. This guards against the May-24 bench failure mode where
-// `from_date + category=news` returned non-en batches that the lang filter
-// dropped wholesale, leaving the caller with zero results despite the
-// upstream engines having returned content. We surface a warning so callers
-// can communicate the relaxation to the user without silently masking it.
+// set. Two-step recovery:
+//   1. Retry with dropThreshold disabled (batch-drop turned off) so individual
+//      target-language hits inside noisy batches survive instead of being
+//      collateral damage. Preserves the integration-test invariant that one
+//      English result among three Chinese ones still surfaces.
+//   2. If still empty, return the URL-valid raw set with a relaxed warning —
+//      this covers the May-24 bench failure mode where every engine batch was
+//      non-target (e.g. news verticals returning only foreign-language hits).
 export function filterByLanguageWithFallback<T extends RawLike>(
   results: T[],
   opts: FilterOptions,
@@ -149,8 +152,22 @@ export function filterByLanguageWithFallback<T extends RawLike>(
   const filtered = filterByLanguage(results, opts);
   if (filtered.results.length > 0) return filtered;
 
-  // Strict filter killed everything despite raw results being present —
-  // retain the URL-validation step (always desirable) and surface a warning.
+  // Recovery step 1: disable batch drop, keep per-result lang filter.
+  const perResult = filterByLanguage(results, { ...opts, dropThreshold: 1.0 });
+  if (perResult.results.length > 0) {
+    return {
+      results: perResult.results,
+      discarded: perResult.discarded,
+      warnings: [
+        ...filtered.warnings,
+        `language_filter_relaxed: strict batch drop emptied results; ` +
+          `falling back to per-result lang filter with target=${opts.target}.`,
+      ],
+    };
+  }
+
+  // Recovery step 2: every result is non-target. Surface the raw set with a
+  // warning so the caller can communicate the relaxation explicitly.
   const urlValid = results.filter((r) => isValidUrl(r.url));
   if (urlValid.length === 0) return filtered;
 
