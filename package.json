@@ -107,6 +107,7 @@
     "ink-big-text": "^2.0.0",
     "ink-gradient": "^3.0.0",
     "linkedom": "^0.18.12",
+    "onnxruntime-node": "1.21.0",
     "openai": "^6.35.0",
     "ora": "^9.3.0",
     "pdf-parse": "^2.4.5",

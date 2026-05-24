@@ -11,7 +11,11 @@ const pkg = JSON.parse(
 };
 
 describe('package.json: forbidden deps after Python-rerank migration', () => {
-  const FORBIDDEN = ['@xenova/transformers', 'onnxruntime-node', 'onnx-proto', 'onnxruntime-web'];
+  // onnxruntime-node is intentionally allowed: fastembed (still the local
+  // embedding backend) pulls it transitively and the v0.1.11 bench surfaced
+  // npx consumers missing it when not hoisted to wigolo's own dependencies.
+  // The other ONNX deps were banned because the rerank stack moved to Python.
+  const FORBIDDEN = ['@xenova/transformers', 'onnx-proto', 'onnxruntime-web'];
 
   for (const name of FORBIDDEN) {
     it(`dependencies does not include ${name}`, () => {
