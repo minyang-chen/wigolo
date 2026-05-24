@@ -235,7 +235,7 @@ describe('runDoctor', () => {
 
     it('reports embedding provider ready with model id and dim', async () => {
       await runDoctor('/tmp/.wigolo');
-      expect(outBuffer).toMatch(/V1 embeddings:/);
+      expect(outBuffer).toMatch(/Core embeddings:/);
       expect(outBuffer).toMatch(/provider:\s+ready \(fastembed BAAI\/bge-small-en-v1\.5, dim=384\)/);
     });
 
@@ -249,7 +249,7 @@ describe('runDoctor', () => {
 
     it('reports sqlite-vec extension loaded with version', async () => {
       await runDoctor('/tmp/.wigolo');
-      expect(outBuffer).toMatch(/V1 sqlite-vec:/);
+      expect(outBuffer).toMatch(/Core sqlite-vec:/);
       expect(outBuffer).toMatch(/extension:\s+loaded \(vec_version 0\.1\.7-alpha\.2\)/);
     });
 
