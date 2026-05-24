@@ -64,6 +64,44 @@ function buildSignal(opts: { timeoutMs?: number; signal?: AbortSignal }): AbortS
   return AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
 }
 
+const RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 529]);
+const RETRY_MESSAGE_PATTERN = /\b(429|500|502|503|504|529)\b|too many requests|rate.?limit|unavailable|overloaded|high demand|service unavailable|temporar/i;
+const MAX_RETRIES = 2;
+const BASE_BACKOFF_MS = 500;
+
+function isTransientError(err: unknown): boolean {
+  if (!err) return false;
+  const status = (err as { status?: unknown }).status;
+  if (typeof status === 'number' && RETRY_STATUS.has(status)) return true;
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'string' && /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|ECONNREFUSED/.test(code)) {
+    return true;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return RETRY_MESSAGE_PATTERN.test(msg);
+}
+
+async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt === MAX_RETRIES || !isTransientError(err)) throw err;
+      const backoff = BASE_BACKOFF_MS * Math.pow(3, attempt);
+      log.warn('LLM call transient failure, retrying', {
+        label,
+        attempt: attempt + 1,
+        backoffMs: backoff,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await new Promise((r) => setTimeout(r, backoff));
+    }
+  }
+  throw lastErr;
+}
+
 export async function runLlmText(opts: RunLlmTextOpts): Promise<RunLlmTextResult> {
   const backend = pickBackend(process.env);
   if (!backend) {
@@ -75,11 +113,13 @@ export async function runLlmText(opts: RunLlmTextOpts): Promise<RunLlmTextResult
     const apiKey = process.env[providerEnvVar(backend.provider)] as string;
     const model = resolveModel(backend.provider, opts.modelOverride);
     log.debug('runLlmText cloud', { provider: backend.provider, model });
-    const r: TextCallResult = await TEXT_ADAPTERS[backend.provider](
-      { prompt: opts.prompt, model, maxTokens: opts.maxTokens, signal },
-      apiKey,
-    );
-    return { text: r.text, provider: r.provider, model: r.model, latencyMs: r.latencyMs };
+    return withRetry(`${backend.provider}:${model}`, async () => {
+      const r: TextCallResult = await TEXT_ADAPTERS[backend.provider](
+        { prompt: opts.prompt, model, maxTokens: opts.maxTokens, signal },
+        apiKey,
+      );
+      return { text: r.text, provider: r.provider, model: r.model, latencyMs: r.latencyMs };
+    });
   }
 
   // Custom OpenAI-compatible URL backend (e.g. Ollama, vLLM, LM Studio).
@@ -88,24 +128,30 @@ export async function runLlmText(opts: RunLlmTextOpts): Promise<RunLlmTextResult
     : backend.url.replace(/\/+$/, '') + '/v1/chat/completions';
   const model = opts.modelOverride ?? process.env.WIGOLO_LLM_MODEL ?? 'local';
   log.debug('runLlmText custom', { url: endpoint, model });
-  const start = Date.now();
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: opts.prompt }],
-      max_tokens: opts.maxTokens,
-    }),
-    signal,
+  return withRetry(`custom:${model}`, async () => {
+    const start = Date.now();
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: opts.prompt }],
+        max_tokens: opts.maxTokens,
+      }),
+      signal,
+    });
+    if (!response.ok) {
+      const err = new Error(`Local LLM endpoint returned ${response.status}`) as Error & { status?: number };
+      err.status = response.status;
+      throw err;
+    }
+    const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = payload.choices?.[0]?.message?.content;
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      throw new Error('Local LLM response missing message content');
+    }
+    return { text, provider: 'custom' as const, model, latencyMs: Date.now() - start };
   });
-  if (!response.ok) throw new Error(`Local LLM endpoint returned ${response.status}`);
-  const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const text = payload.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || text.trim().length === 0) {
-    throw new Error('Local LLM response missing message content');
-  }
-  return { text, provider: 'custom', model, latencyMs: Date.now() - start };
 }
 
 export async function runLlmJson(opts: RunLlmJsonOpts): Promise<RunLlmJsonResult> {
