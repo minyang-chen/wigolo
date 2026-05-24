@@ -64,7 +64,22 @@ export async function fetchWithPlaywright(url: string, opts: { timeoutMs?: numbe
   const { context } = await getDaemonBrowser();
   const page = await context.newPage();
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: opts.timeoutMs ?? 30000 });
+    const overall = opts.timeoutMs ?? 30000;
+    await page.goto(url, { waitUntil: 'load', timeout: overall });
+    // SPAs (React/Next.js/etc.) populate the DOM after `load` fires.
+    // Wait for either substantial body text or for the network to go idle —
+    // whichever wins first — then bail out so we never block longer than the
+    // hydration budget. Both branches swallow timeout errors because the
+    // page may legitimately be static.
+    const hydrationBudget = Math.min(3000, Math.max(500, Math.floor(overall / 10)));
+    await Promise.race([
+      page.waitForFunction(
+        () => (document.body?.innerText ?? '').length > 500,
+        undefined,
+        { timeout: hydrationBudget },
+      ).catch(() => undefined),
+      page.waitForLoadState('networkidle', { timeout: hydrationBudget }).catch(() => undefined),
+    ]);
     const html = await page.content();
     const text = await page.evaluate(() => document.body?.innerText ?? '');
     return { html, text };
