@@ -237,6 +237,60 @@ export interface CachedSearchResult {
   stale?: boolean;
 }
 
+/** Filter parameters that participate in the search cache key. Changing any
+ * of these must force a cache miss because the cached payload is filter-
+ * dependent (sub-ticket 2.3). */
+export interface SearchCacheFilters {
+  category?: string | null;
+  include_domains?: string[] | null;
+  exclude_domains?: string[] | null;
+  max_results?: number | null;
+  from_date?: string | null;
+  to_date?: string | null;
+  language?: string | null;
+}
+
+function normaliseDomainList(list?: string[] | null): string[] | null {
+  if (!list || list.length === 0) return null;
+  const lower = list.map((d) => d.toLowerCase().trim()).filter((d) => d.length > 0);
+  if (lower.length === 0) return null;
+  return [...new Set(lower)].sort();
+}
+
+function hasAnyFilter(filters?: SearchCacheFilters): boolean {
+  if (!filters) return false;
+  return (
+    filters.category != null ||
+    (filters.include_domains?.length ?? 0) > 0 ||
+    (filters.exclude_domains?.length ?? 0) > 0 ||
+    filters.max_results != null ||
+    filters.from_date != null ||
+    filters.to_date != null ||
+    filters.language != null
+  );
+}
+
+/** Build a stable cache key string from a query and optional filter params.
+ * Two requests with the same query but different filter values get distinct
+ * keys, so cache lookups respect caller-specified constraints. */
+export function buildSearchCacheKey(
+  query: string,
+  filters?: SearchCacheFilters,
+): string {
+  const q = query.toLowerCase().trim();
+  if (!hasAnyFilter(filters)) return q;
+  const fingerprint = {
+    category: filters!.category ?? null,
+    include_domains: normaliseDomainList(filters!.include_domains),
+    exclude_domains: normaliseDomainList(filters!.exclude_domains),
+    max_results: filters!.max_results ?? null,
+    from_date: filters!.from_date ?? null,
+    to_date: filters!.to_date ?? null,
+    language: filters!.language ?? null,
+  };
+  return `${query} ${JSON.stringify(fingerprint)}`;
+}
+
 export function cacheSearchResults(
   query: string,
   results: SearchResultItem[],

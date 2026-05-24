@@ -26,6 +26,7 @@ vi.mock('../../../../src/search/content-fetch.js', () => ({
 vi.mock('../../../../src/cache/store.js', () => ({
   getCachedSearchResults: vi.fn(() => null),
   cacheSearchResults: vi.fn(),
+  buildSearchCacheKey: (query: string) => query,
 }));
 
 vi.mock('../../../../src/search/evidence.js', async (importOriginal) => {
