@@ -20,7 +20,11 @@ import { dedupAgainstRecentUrls } from './recent-cache-dedup.js';
 import { runSynthesis } from '../answer-synthesis.js';
 import { applyEvidenceDefault, renderCitationsXml } from '../evidence.js';
 import { fetchContentForResults } from '../content-fetch.js';
-import { cacheSearchResults, getCachedSearchResults } from '../../cache/store.js';
+import {
+  buildSearchCacheKey,
+  cacheSearchResults,
+  getCachedSearchResults,
+} from '../../cache/store.js';
 import { getConfig } from '../../config.js';
 import { createLogger } from '../../logger.js';
 import type { Citation } from '../../types.js';
@@ -31,6 +35,24 @@ const DEFAULT_CONTENT_MAX_CHARS = 30000;
 const DEFAULT_MAX_TOTAL_CHARS = 50000;
 
 const RRF_K = 60;
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function matchesAnyDomain(url: string, domains: string[]): boolean {
+  const host = hostnameOf(url);
+  if (!host) return false;
+  for (const raw of domains) {
+    const needle = raw.toLowerCase().replace(/^\./, '');
+    if (host === needle || host.endsWith(`.${needle}`)) return true;
+  }
+  return false;
+}
 
 function normalizeArrayQueries(queries: string[]): string[] {
   const seen = new Set<string>();
@@ -107,7 +129,18 @@ export class CoreSearchProvider implements SearchProvider {
     // Display query is the first input string (back-compat) so consumers can
     // still echo what was asked; arrays just join with " | " for clarity.
     const displayQuery = isArray ? (input.query as string[]).filter(Boolean).join(' | ') : queries[0];
-    const cacheKey = queries.join(' | ');
+    // Cache key includes filter params (sub-ticket 2.3) — without this,
+    // include_domains / max_results / exclude_domains are silently ignored
+    // on cache hits.
+    const cacheKey = buildSearchCacheKey(queries.join(' | '), {
+      category: input.category,
+      include_domains: input.include_domains,
+      exclude_domains: input.exclude_domains,
+      max_results: input.max_results,
+      from_date: input.from_date,
+      to_date: input.to_date,
+      language: input.language,
+    });
 
     let items: SearchResultItem[] = [];
     let enginesUsed: string[] = [];
@@ -123,7 +156,20 @@ export class CoreSearchProvider implements SearchProvider {
       try {
         const cached = getCachedSearchResults(cacheKey);
         if (cached && !cached.stale) {
-          items = cached.results.map((r) => ({ ...r, cached: true, cached_at: cached.searched_at }));
+          // Defence-in-depth (sub-ticket 2.3): re-apply caller filters on
+          // top of the cached payload before returning, so even if the
+          // cache key omits a future filter, that filter still applies.
+          let filtered = cached.results;
+          if (input.include_domains?.length) {
+            filtered = filtered.filter((r) => matchesAnyDomain(r.url, input.include_domains!));
+          }
+          if (input.exclude_domains?.length) {
+            filtered = filtered.filter((r) => !matchesAnyDomain(r.url, input.exclude_domains!));
+          }
+          if (typeof input.max_results === 'number' && input.max_results >= 0) {
+            filtered = filtered.slice(0, input.max_results);
+          }
+          items = filtered.map((r) => ({ ...r, cached: true, cached_at: cached.searched_at }));
           enginesUsed = cached.engines_used;
           servedFromCache = true;
           cachedAt = cached.searched_at;
