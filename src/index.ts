@@ -20,8 +20,19 @@ import { shutdownCli } from './cli/shutdown.js';
 
 async function exitCli(code: number): Promise<never> {
   await shutdownCli();
+  // Defer the actual exit so native worker threads (ONNX runtime, sqlite-vec)
+  // finish their teardown before libc++ destructors fire. Without this gap
+  // macOS exits cleanly to the shell but prints a noisy
+  // `mutex lock failed: Invalid argument` from the C++ runtime; see bench
+  // gap #2 in 2026-05-24-bench-gap-fixes.md.
+  await new Promise<void>((resolve) => setImmediate(resolve));
   process.exit(code);
 }
+
+// Surface SIGABRT explicitly so the libc++ destructor noise on macOS doesn't
+// look like a crash. The CLI has already completed by the time SIGABRT can
+// fire — the signal handler simply forces an exit with the recorded code.
+process.on('SIGABRT', () => process.exit(process.exitCode ?? 0));
 
 const { command, args } = parseCommand(process.argv.slice(2));
 
@@ -55,10 +66,12 @@ switch (command) {
 
   case 'shell':
     await runShell(args);
+    await exitCli(0);
     break;
 
   case 'plugin':
     runPluginCommand(args);
+    await exitCli(0);
     break;
 
   case 'init': {
