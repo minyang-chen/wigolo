@@ -1,5 +1,5 @@
 import { parseHTML } from 'linkedom';
-import { matchesPatterns } from './url-utils.js';
+import { matchesPatterns, canonicalForOutput } from './url-utils.js';
 import { parseSitemap, parseSitemapIndex, extractSitemapUrlFromRobots } from './sitemap.js';
 import { createLogger } from '../logger.js';
 import type { MapOutput } from '../types.js';
@@ -83,8 +83,12 @@ export async function mapUrls(input: MapInput, fetchFn: LightFetchFn): Promise<M
     };
   }
 
-  const discovered = new Set<string>([input.url]);
-  const queued = new Set<string>([input.url]);
+  // Store discovered URLs by canonical form so /a and /a/ collapse to one
+  // entry. The original (pre-canonical) string is retained for fetching since
+  // some servers 404 on the slash-stripped variant.
+  const seedCanonical = canonicalForOutput(input.url);
+  const discovered = new Set<string>([seedCanonical]);
+  const queued = new Set<string>([seedCanonical]);
   const queue: Array<{ url: string; depth: number }> = [{ url: input.url, depth: 0 }];
   let sitemapFound = false;
 
@@ -96,10 +100,12 @@ export async function mapUrls(input: MapInput, fetchFn: LightFetchFn): Promise<M
       for (const sitemapUrl of sitemapUrls) {
         if (discovered.size >= maxPages) break;
         if (matchesPatterns(sitemapUrl, input.include_patterns, input.exclude_patterns)) {
-          discovered.add(sitemapUrl);
+          const canonical = canonicalForOutput(sitemapUrl);
+          if (discovered.has(canonical)) continue;
+          discovered.add(canonical);
           // Also queue sitemap URLs for BFS traversal so their links are explored
-          if (!queued.has(sitemapUrl)) {
-            queued.add(sitemapUrl);
+          if (!queued.has(canonical)) {
+            queued.add(canonical);
             queue.push({ url: sitemapUrl, depth: 0 });
           }
         }
@@ -123,14 +129,15 @@ export async function mapUrls(input: MapInput, fetchFn: LightFetchFn): Promise<M
 
       for (const link of links) {
         if (discovered.size >= maxPages) break;
-        if (discovered.has(link)) continue;
+        const canonical = canonicalForOutput(link);
+        if (discovered.has(canonical)) continue;
         if (!matchesPatterns(link, input.include_patterns, input.exclude_patterns)) continue;
 
-        discovered.add(link);
+        discovered.add(canonical);
 
         // Only queue for further traversal if we haven't hit max depth
-        if (current.depth + 1 <= maxDepth && !queued.has(link)) {
-          queued.add(link);
+        if (current.depth + 1 <= maxDepth && !queued.has(canonical)) {
+          queued.add(canonical);
           queue.push({ url: link, depth: current.depth + 1 });
         }
       }

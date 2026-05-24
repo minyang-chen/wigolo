@@ -770,4 +770,27 @@ describe('mapUrls', () => {
     expect(result.urls).toEqual(['https://example.com']);
     expect(result.total_found).toBe(1);
   });
+
+  it('collapses trailing-slash duplicates into a single canonical URL', async () => {
+    const fetchFn = createMockFetch({
+      'https://example.com': htmlPage([
+        'https://example.com/docs',
+        'https://example.com/docs/',
+        'https://example.com/api',
+        'https://example.com/api/',
+      ]),
+      'https://example.com/docs': htmlPage([]),
+      'https://example.com/api': htmlPage([]),
+    });
+
+    const result = await mapUrls(
+      { url: 'https://example.com', max_depth: 1, max_pages: 100 },
+      fetchFn,
+    );
+
+    expect(result.urls).toContain('https://example.com/docs');
+    expect(result.urls).toContain('https://example.com/api');
+    expect(result.urls.some((u) => u.endsWith('/docs/'))).toBe(false);
+    expect(result.urls.some((u) => u.endsWith('/api/'))).toBe(false);
+  });
 });
