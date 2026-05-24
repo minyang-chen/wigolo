@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { filterByLanguage, type RawSearchResult } from '../../../src/search/language-filter.js';
+import {
+  filterByLanguage,
+  filterByLanguageWithFallback,
+  type RawSearchResult,
+} from '../../../src/search/language-filter.js';
 
 const en = (i: number): RawSearchResult => ({
   url: `https://example.com/${i}`,
@@ -33,5 +37,42 @@ describe('filterByLanguage', () => {
     const out = filterByLanguage([en(1), bad], { target: 'en', dropThreshold: 0.4 });
     expect(out.results).toHaveLength(1);
     expect(out.discarded.find(d => d.reason === 'invalid_url')).toBeDefined();
+  });
+});
+
+describe('filterByLanguageWithFallback', () => {
+  it('returns the strict-filtered result when filter leaves matches', () => {
+    const out = filterByLanguageWithFallback(
+      [en(1), en(2), en(3)],
+      { target: 'en', dropThreshold: 0.4 },
+    );
+    expect(out.results).toHaveLength(3);
+    expect(out.warnings.some(w => w.includes('language_filter_relaxed'))).toBe(false);
+  });
+
+  it('falls back to URL-valid raw set with warning when filter empties results', () => {
+    // All Chinese results — target=en — strict filter drops everything.
+    const out = filterByLanguageWithFallback(
+      [zh(1), zh(2), zh(3)],
+      { target: 'en', dropThreshold: 0.4 },
+    );
+    expect(out.results.length).toBeGreaterThan(0);
+    expect(out.warnings.some(w => w.includes('language_filter_relaxed'))).toBe(true);
+  });
+
+  it('still drops invalid URLs in fallback path', () => {
+    const bad: RawSearchResult = { url: 'not a url', title: 'x', snippet: 'y', engine: 'bing' };
+    const out = filterByLanguageWithFallback(
+      [zh(1), bad, zh(2)],
+      { target: 'en', dropThreshold: 0.4 },
+    );
+    expect(out.results.length).toBe(2);
+    for (const r of out.results) expect(r.url).not.toBe('not a url');
+  });
+
+  it('returns empty when input is empty (no warning needed)', () => {
+    const out = filterByLanguageWithFallback([], { target: 'en', dropThreshold: 0.4 });
+    expect(out.results).toEqual([]);
+    expect(out.warnings).toEqual([]);
   });
 });

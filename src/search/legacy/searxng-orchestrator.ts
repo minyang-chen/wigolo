@@ -15,7 +15,7 @@ import { applyAllFilters } from '../filters.js';
 import { runSynthesis } from '../answer-synthesis.js';
 import { applyEvidenceDefault } from '../evidence.js';
 import { normalizeQueries, fanOutSearch, synthesizeIntent, expandIfSingle } from '../multi-query.js';
-import { filterByLanguage } from '../language-filter.js';
+import { filterByLanguageWithFallback } from '../language-filter.js';
 import { hasRecencyIntent } from '../reranker/recency.js';
 import { getExtractProvider } from '../../providers/extract-provider.js';
 import { truncateSmartly } from '../truncate.js';
@@ -198,7 +198,7 @@ export async function runSearxngSearch(
     );
 
     const filterTargetMq = (input.language ?? 'en').slice(0, 2).toLowerCase();
-    const filteredMq = filterByLanguage(rawResults, {
+    const filteredMq = filterByLanguageWithFallback(rawResults, {
       target: filterTargetMq,
       dropThreshold: 0.7,
     });
@@ -405,7 +405,7 @@ export async function runSearxngSearch(
   await Promise.allSettled(searchPromises);
 
   const filterTargetSq = (input.language ?? 'en').slice(0, 2).toLowerCase();
-  const filteredSq = filterByLanguage(allRaw, {
+  const filteredSq = filterByLanguageWithFallback(allRaw, {
     target: filterTargetSq,
     dropThreshold: 0.4,
   });

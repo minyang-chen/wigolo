@@ -132,3 +132,36 @@ export function filterByLanguage<T extends RawLike>(
 
   return { results: kept, discarded, warnings };
 }
+
+// Apply filterByLanguage but recover when the filter empties a non-empty raw
+// set. This guards against the May-24 bench failure mode where
+// `from_date + category=news` returned non-en batches that the lang filter
+// dropped wholesale, leaving the caller with zero results despite the
+// upstream engines having returned content. We surface a warning so callers
+// can communicate the relaxation to the user without silently masking it.
+export function filterByLanguageWithFallback<T extends RawLike>(
+  results: T[],
+  opts: FilterOptions,
+): FilterResult<T> {
+  if (results.length === 0) {
+    return filterByLanguage(results, opts);
+  }
+  const filtered = filterByLanguage(results, opts);
+  if (filtered.results.length > 0) return filtered;
+
+  // Strict filter killed everything despite raw results being present —
+  // retain the URL-validation step (always desirable) and surface a warning.
+  const urlValid = results.filter((r) => isValidUrl(r.url));
+  if (urlValid.length === 0) return filtered;
+
+  return {
+    results: urlValid,
+    discarded: filtered.discarded.filter((d) => d.reason === 'invalid_url'),
+    warnings: [
+      ...filtered.warnings,
+      `language_filter_relaxed: every engine batch failed the language check for target=${opts.target}; ` +
+        `returning ${urlValid.length} unfiltered result(s) to avoid an empty response. ` +
+        `Pass an explicit language= or refine the query if results look wrong.`,
+    ],
+  };
+}
