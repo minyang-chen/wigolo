@@ -73,9 +73,10 @@ function safeAbsoluteUrl(value: string | null | undefined, baseUrl?: string): st
   if (!value) return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  // Avoid javascript: / mailto: / data: which never resolve to a fetchable
-  // brand asset.
-  if (/^(javascript|mailto|tel|data):/i.test(trimmed)) return undefined;
+  // Avoid javascript: / mailto: / data: / file: / vbscript: / blob: which
+  // never resolve to a fetchable brand asset and can be abused by a
+  // downstream auto-fetcher (e.g. file:///etc/passwd local exfil).
+  if (/^(javascript|mailto|tel|data|file|vbscript|blob):/i.test(trimmed)) return undefined;
   try {
     if (baseUrl) return new URL(trimmed, baseUrl).href;
     // No base — accept only absolute URLs.

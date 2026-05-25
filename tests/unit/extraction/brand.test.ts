@@ -371,6 +371,51 @@ describe('extractBrand — URL safety', () => {
     expect(out.logo_url).not.toMatch(/^mailto:/);
   });
 
+  it('drops file: scheme from logo_url, favicon_url, og_image_url', () => {
+    // A downstream auto-fetcher must never be tricked into reading local
+    // files via a brand URL like `file:///etc/passwd`.
+    const html = `<!doctype html><html><head>
+      <link rel="icon" href="file:///etc/hosts">
+      <meta property="og:image" content="file:///etc/passwd">
+    </head><body>
+      <header><a href="/"><img src="file:///etc/shadow" alt="X"></a></header>
+    </body></html>`;
+    const out = extractBrand(html, { baseUrl: 'https://x.example/' });
+    expect(out.logo_url ?? '').not.toMatch(/^file:/i);
+    expect(out.favicon_url ?? '').not.toMatch(/^file:/i);
+    expect(out.og_image_url ?? '').not.toMatch(/^file:/i);
+  });
+
+  it('drops vbscript: scheme from logo_url, favicon_url, og_image_url', () => {
+    // Legacy IE-style script schemes must be rejected with the same rigor
+    // as javascript: — a downstream renderer could still execute them.
+    const html = `<!doctype html><html><head>
+      <link rel="icon" href="vbscript:msgbox(1)">
+      <meta property="og:image" content="VBScript:msgbox(2)">
+    </head><body>
+      <header><a href="/"><img src="vbscript:msgbox(3)" alt="X"></a></header>
+    </body></html>`;
+    const out = extractBrand(html, { baseUrl: 'https://x.example/' });
+    expect(out.logo_url ?? '').not.toMatch(/^vbscript:/i);
+    expect(out.favicon_url ?? '').not.toMatch(/^vbscript:/i);
+    expect(out.og_image_url ?? '').not.toMatch(/^vbscript:/i);
+  });
+
+  it('drops blob: scheme from logo_url, favicon_url, og_image_url', () => {
+    // blob: URLs are session-scoped and never resolve to a stable fetchable
+    // asset for an external agent — reject them up front.
+    const html = `<!doctype html><html><head>
+      <link rel="icon" href="blob:https://x.example/abc-123">
+      <meta property="og:image" content="blob:https://x.example/def-456">
+    </head><body>
+      <header><a href="/"><img src="blob:https://x.example/ghi-789" alt="X"></a></header>
+    </body></html>`;
+    const out = extractBrand(html, { baseUrl: 'https://x.example/' });
+    expect(out.logo_url ?? '').not.toMatch(/^blob:/i);
+    expect(out.favicon_url ?? '').not.toMatch(/^blob:/i);
+    expect(out.og_image_url ?? '').not.toMatch(/^blob:/i);
+  });
+
   it('resolves relative URLs against baseUrl', () => {
     const html = wrap(`
       <link rel="icon" type="image/svg+xml" href="/icon.svg">
