@@ -233,6 +233,8 @@ export interface SearchResultItem {
   cached?: boolean;
   cached_at?: string;
   stale?: boolean;
+  /** Always emitted by the core path: explainable score breakdown. */
+  evidence_score?: EvidenceScore;
   /** Debug-only — emitted when input.include_engine_outcomes is true. */
   _score_breakdown?: ScoreBreakdown;
 }
@@ -442,6 +444,27 @@ export interface ScoreBreakdown {
   final: number;
 }
 
+export interface EvidenceScore {
+  /** 0..1, what callers usually consume. Matches `relevance_score`. */
+  final: number;
+  components: {
+    /** RRF score before any boost (small, ~0.016 range raw). */
+    base_rrf: number;
+    /** Sentence-embedding cosine vs query when context_rank was applied. */
+    context_cosine: number;
+    /** Phase 2 #1 domain authority/quality multiplier. */
+    domain_quality: number;
+    /** Phase 2 #1 lexical alignment of query against title+snippet. */
+    lexical_alignment: number;
+    /** Recency multiplier applied when the query has temporal intent. */
+    recency_boost: number;
+    /** Number of engines that surfaced this URL. */
+    engine_consensus: number;
+  };
+  /** One-line human-readable explanation summarizing the breakdown. */
+  explanation: string;
+}
+
 export interface RawSearchResult {
   title: string;
   url: string;
@@ -449,6 +472,9 @@ export interface RawSearchResult {
   relevance_score: number;
   engine: string;
   published_date?: string; // ISO date string, when engine provides it
+  /** Always populated by the core orchestrator post-rank: explainable
+   * per-result evidence score with components + one-line explanation. */
+  evidence_score?: EvidenceScore;
   /** Debug-only — present when the core orchestrator was asked to emit
    * score breakdowns (via include_engine_outcomes on the public surface). */
   _score_breakdown?: ScoreBreakdown;

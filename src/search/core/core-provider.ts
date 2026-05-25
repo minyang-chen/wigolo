@@ -245,6 +245,7 @@ export class CoreSearchProvider implements SearchProvider {
         snippet: r.snippet,
         relevance_score: r.relevance_score,
         ...(r.published_date ? { published_date: r.published_date } : {}),
+        ...(r.evidence_score ? { evidence_score: r.evidence_score } : {}),
         ...(r._score_breakdown ? { _score_breakdown: r._score_breakdown } : {}),
       }));
 
