@@ -2,8 +2,17 @@ import { parseHTML } from 'linkedom';
 import { createLogger } from '../logger.js';
 import type { BrandExtractionOutput } from '../types.js';
 import { extractJsonLd } from './jsonld.js';
+import { extractPaletteFromBuffer, MAX_IMAGE_BYTES } from './brand-palette.js';
 
 const log = createLogger('extract');
+
+/** Total brand round-trip budget — spec target. Palette extraction must
+ *  not push the call past this even when the logo fetch is slow. */
+const PALETTE_FETCH_TIMEOUT_MS = 1500;
+
+/** Minimum colors before palette extraction fires. CSS vars sometimes
+ *  return 1 color; we still want a second so downstream UIs have a pair. */
+const PALETTE_MIN_COLORS = 2;
 
 type ProvenanceLogo = NonNullable<BrandExtractionOutput['provenance']>['logo'];
 type ProvenanceColors = NonNullable<BrandExtractionOutput['provenance']>['colors'];
@@ -661,9 +670,152 @@ function extractFontsFromCss(css: string): FontResult {
   };
 }
 
+export interface BrandImageFetchResult {
+  buffer: Buffer;
+  contentType: string;
+}
+
+export type BrandImageFetcher = (
+  url: string,
+  options?: { timeoutMs?: number },
+) => Promise<BrandImageFetchResult | null>;
+
 export interface ExtractBrandOptions {
   /** Base URL for resolving relative href/src; usually the page URL. */
   baseUrl?: string;
+  /**
+   * When provided, this fetcher is used to download logo/og_image bytes
+   * for palette extraction (slice B2b). Defaults to a small wrapper over
+   * the existing `httpFetch` helper so cache + UA rotation + retries are
+   * reused. Pass a mock in tests to keep the suite hermetic.
+   *
+   * Set to `null` to explicitly disable palette extraction (useful for
+   * callers that have an already-passing CSS-var color result and want to
+   * skip the network round-trip).
+   */
+  imageFetcher?: BrandImageFetcher | null;
+}
+
+/**
+ * Default image fetcher. We can't reuse `httpFetch` directly because it
+ * decodes the response body via `response.text()`, which corrupts binary
+ * bytes — fine for HTML, fatal for PNG/JPEG. We do a single HEAD-like
+ * round-trip via the same Node-built-in `fetch` that `httpFetch` uses
+ * under the hood, applying the same timeout discipline.
+ *
+ * SSRF safety is upstream: the URL we receive here comes from
+ * `safeAbsoluteUrl()` inside `extractBrand`, which already strips
+ * javascript:/data:/file:/blob:/vbscript: schemes. The caller-supplied
+ * `imageFetcher` override is intended for tests; production wiring uses
+ * this default.
+ *
+ * Streaming + early-abort when content-length signals an oversize body
+ * keeps the bandwidth honest: the spec's 2s round-trip budget assumes
+ * we don't pull a 50MB hero image just to throw it away.
+ */
+const defaultImageFetcher: BrandImageFetcher = async (url, opts) => {
+  const timeoutMs = opts?.timeoutMs ?? PALETTE_FETCH_TIMEOUT_MS;
+  try {
+    const signal = AbortSignal.timeout(timeoutMs);
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'image/png,image/jpeg,image/webp,image/avif,image/*;q=0.8',
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      },
+      signal,
+      redirect: 'follow',
+    });
+    if (!response.ok) {
+      log.debug('palette fetch: non-2xx', { url, status: response.status });
+      return null;
+    }
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_BYTES) {
+      log.debug('palette fetch: content-length over cap', { url, contentLength });
+      try { await response.body?.cancel(); } catch { /* */ }
+      return null;
+    }
+    const ab = await response.arrayBuffer();
+    if (ab.byteLength > MAX_IMAGE_BYTES) {
+      log.debug('palette fetch: body over cap', { url, bytes: ab.byteLength });
+      return null;
+    }
+    return {
+      buffer: Buffer.from(ab),
+      contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+    };
+  } catch (err) {
+    log.debug('palette fetch failed', { url, error: String(err) });
+    return null;
+  }
+};
+
+/**
+ * Async brand extraction (slice B2b). Runs the synchronous extractor first,
+ * then — when CSS-var colors come up short — fetches the logo/og_image and
+ * runs palette quantization. Returns the augmented output with
+ * `provenance.colors` set to `'palette-extraction'` when the image path
+ * fires, `'unknown'` when the image fetch fails or no usable image exists.
+ *
+ * The synchronous `extractBrand` remains the canonical sync entry point.
+ */
+export async function extractBrandAsync(
+  html: string,
+  options: ExtractBrandOptions = {},
+): Promise<BrandExtractionOutput> {
+  const out = extractBrand(html, options);
+  const fetcher = options.imageFetcher === undefined ? defaultImageFetcher : options.imageFetcher;
+  if (fetcher === null) return out;
+
+  const existing = out.primary_colors ?? [];
+  if (existing.length >= PALETTE_MIN_COLORS) return out;
+
+  // Pick the logo/og_image source. Logo is preferred — Organization-shape
+  // color is most semantic. og_image_url is a fallback because it's often
+  // a marketing hero shot, not a brand mark. We do NOT use favicon_url
+  // here: favicons are typically too small to quantize meaningfully and
+  // are usually monochrome.
+  const candidate = out.logo_url ?? out.og_image_url;
+  if (!candidate) {
+    // Nothing to fetch; provenance stays as the sync extractor decided.
+    return out;
+  }
+
+  // Reject SVG before spending the fetch budget — palette quantization
+  // needs raster pixels. SVG logos are common; this short-circuit saves
+  // the round-trip.
+  if (candidate.toLowerCase().endsWith('.svg')) {
+    log.debug('palette: candidate is SVG, skipping image fetch', { url: candidate });
+    return out;
+  }
+
+  const fetched = await fetcher(candidate, { timeoutMs: PALETTE_FETCH_TIMEOUT_MS });
+  if (!fetched) {
+    log.debug('palette: fetch returned null', { url: candidate });
+    return out;
+  }
+
+  const palette = await extractPaletteFromBuffer(fetched.buffer, fetched.contentType);
+  if (!palette || palette.colors.length < PALETTE_MIN_COLORS) {
+    log.debug('palette: quantization produced insufficient colors', {
+      url: candidate,
+      colorCount: palette?.colors.length ?? 0,
+    });
+    return out;
+  }
+
+  // Replace primary_colors and flip provenance. We replace rather than
+  // merge because CSS vars returned <2 — the image path is now the
+  // authoritative source for this site's palette.
+  out.primary_colors = palette.colors;
+  if (out.provenance) {
+    out.provenance.colors = 'palette-extraction';
+  } else {
+    out.provenance = { colors: 'palette-extraction' };
+  }
+  log.debug('palette extracted', { url: candidate, colors: palette.colors });
+  return out;
 }
 
 export function extractBrand(
