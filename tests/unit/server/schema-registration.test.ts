@@ -90,6 +90,17 @@ vi.mock('../../../src/cache/store.js', () => ({
   isExpired: vi.fn().mockReturnValue(false),
 }));
 
+// Avoid cold ONNX startup on every `connectClient()` — schema registration
+// + stub dispatch never need the real embedding subprocess.
+vi.mock('../../../src/embedding/embed.js', () => ({
+  getEmbeddingService: () => ({
+    init: vi.fn().mockResolvedValue(undefined),
+    isAvailable: () => false,
+    shutdown: vi.fn(),
+  }),
+  resetEmbeddingService: vi.fn(),
+}));
+
 async function connectClient() {
   const { initSubsystems, createMcpServer } = await import('../../../src/server.js');
   const subs = await initSubsystems();

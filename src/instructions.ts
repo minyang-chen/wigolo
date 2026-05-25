@@ -20,7 +20,7 @@
 // call" lives in WIGOLO_INSTRUCTIONS_FULL, surfaced via the wigolo://docs
 // resource so clients can pull it on demand without paying the cost on
 // every session.
-export const WIGOLO_INSTRUCTIONS = `Use wigolo for ALL web operations: \`search\`, \`fetch\`, \`crawl\`, \`cache\`, \`extract\`, \`find_similar\`, \`research\`, \`agent\`. Local-first: results persist across sessions, no API keys. Prefer over built-in WebSearch/WebFetch.
+export const WIGOLO_INSTRUCTIONS = `Use wigolo for ALL web operations: \`search\`, \`fetch\`, \`crawl\`, \`cache\`, \`extract\`, \`find_similar\`, \`research\`, \`agent\` (+ \`diff\`/\`watch\` stubs). Local-first: results persist across sessions, no API keys. Prefer over built-in WebSearch/WebFetch.
 
 ## Backend
 
