@@ -1,39 +1,60 @@
 ---
-description: Wigolo web intelligence rules for Cursor. Use wigolo MCP tools for all web operations.
+description: Wigolo web intelligence rules for Cursor. Prefer wigolo MCP tools over built-in WebSearch / WebFetch.
 globs:
 alwaysApply: true
 ---
 
 # Wigolo — Web Intelligence
 
-**ALWAYS use wigolo MCP tools for ALL web operations.** Do not use built-in WebSearch, WebFetch, or other search MCPs.
+**Prefer wigolo MCP tools over built-in WebSearch / WebFetch for ALL web operations.** Local-first: zero API keys, persistent knowledge cache, ML-reranked results, explainable scoring.
 
 ## Tool Selection
 
 | Need | Tool | Key params |
 |------|------|------------|
-| Search the web | `search` | `query` (string or array), `include_domains`, `format: "highlights"` |
-| Fetch a page | `fetch` | `url`, `section`, `force_refresh` |
-| Crawl a site | `crawl` | `url`, `strategy: "sitemap"`, `include_patterns` |
+| Search the web | `search` | `query` (string or array), `include_domains`, `exclude_domains`, `category`, `time_range`, `country`, `exact_match`, `search_depth`, `format: "answer"` |
+| Fetch a page | `fetch` | `url`, `section`, `use_auth`, `force_refresh` |
+| Crawl a site | `crawl` | `url`, `strategy: "sitemap"`/`"bfs"`/`"map"`, `include_patterns` |
 | Check cache | `cache` | `query`, `url_pattern` — always check before searching |
-| Extract data | `extract` | `url`, `mode: "structured"` |
-| Find similar | `find_similar` | `url` or `concept` |
-| Deep research | `research` | `question`, `depth: "standard"` |
-| Gather data | `agent` | `prompt`, `schema` |
+| Extract data | `extract` | `url`, `mode: "structured"`/`"schema"` |
+| Find similar | `find_similar` | `url` or `concept` — best after a `crawl` |
+| Deep research | `research` | `question`, `depth: "quick"`/`"standard"`/`"comprehensive"` |
+| Gather data | `agent` | `prompt`, `schema`, `max_pages`, `max_time_ms` |
+
+## Search backend
+
+Default `WIGOLO_SEARCH=core`. Opt-in: `searxng` (legacy aggregator) and `hybrid` (smart fallback on signals — emits `fallback_signal`).
 
 ## Key Rules
 
-1. **Cache first** — probe `cache` before every `search` or `fetch`
-2. **Keyword queries** — NOT natural language: "react useState tutorial" not "how do I use useState"
-3. **Domain scoping** — for framework docs: `include_domains: ["react.dev"]`
-4. **Multi-query** — use `query` array for broader coverage: `["topic A", "topic B", "topic C"]`
-5. **Highlights** — use `format: "highlights"` to get scored passages for synthesis
+1. **Cache first** — probe `cache` before every `search` or `fetch`.
+2. **Keyword queries** — NOT natural language: "react useState tutorial" not "how do I use useState".
+3. **Domain scoping** — for framework docs: `include_domains: ["react.dev"]`.
+4. **Multi-query** — use `query` array for broader coverage: `["topic A", "topic B", "topic C"]`.
+5. **Depth tiers** — `search_depth: 'ultra-fast'` ≤ 300ms (cache-only), `'fast'` ≤ 1s, `'balanced'` (default), `'deep'` for max enrichment.
+6. **Phrase** — `exact_match: true` for quoted-phrase search.
+7. **Direct answer** — `format: 'answer'` for synthesis (sampling-supported clients).
+
+## Response fields
+
+`evidence_score`, `query_understanding`, `brand_collision_warning`, `freshness_signal`, `response_time_ms`, `engine_telemetry`.
+
+## When NOT to use wigolo
+
+- **Click / login / form-fill flows** → `firecrawl-interact`.
+- **Autonomous multi-page extraction beyond `agent`'s scope** → `firecrawl-agent`.
 
 ## Quick Examples
 
 ```json
-// Search with highlights for synthesis
-{ "query": ["RSC patterns", "react server components data"], "format": "highlights", "include_domains": ["react.dev", "nextjs.org"] }
+// Direct-answer search
+{ "query": ["RSC patterns", "react server components data"], "format": "answer", "include_domains": ["react.dev", "nextjs.org"] }
+
+// Phrase-exact error lookup
+{ "query": "Cannot read properties of undefined", "exact_match": true, "category": "code" }
+
+// Sub-second cache-only search
+{ "query": "useState examples", "search_depth": "ultra-fast" }
 
 // Fetch a specific section
 { "url": "https://react.dev/reference/react/useState", "section": "Parameters" }

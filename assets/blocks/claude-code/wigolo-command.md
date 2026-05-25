@@ -10,7 +10,7 @@ Quick reference for wigolo web intelligence tools. Wigolo provides 8 MCP tools f
 
 | Need | Tool | Key params |
 |------|------|------------|
-| Search | `search` | `query` (array!), `include_domains`, `format: "highlights"` |
+| Search | `search` | `query` (array!), `include_domains`, `category`, `time_range`, `exact_match`, `search_depth`, `format: "answer"` |
 | Fetch page | `fetch` | `url`, `section`, `force_refresh` |
 | Crawl site | `crawl` | `url`, `strategy: "sitemap"`, `max_pages`, `include_patterns` |
 | Check cache | `cache` | `query`, `url_pattern`, `stats` |
@@ -26,8 +26,14 @@ Quick reference for wigolo web intelligence tools. Wigolo provides 8 MCP tools f
 cache({ "query": "oauth2 pkce", "url_pattern": "*auth0.com*" })
 // → if empty, fall through to search
 
-// Multi-query search (breadth)
-search({ "query": ["react hooks 2026", "useEffect patterns", "react state management"], "format": "highlights" })
+// Multi-query search (breadth) with direct-answer synthesis
+search({ "query": ["react hooks 2026", "useEffect patterns", "react state management"], "format": "answer" })
+
+// Sub-second cache-only search
+search({ "query": "react hooks", "search_depth": "ultra-fast" })
+
+// Phrase-exact error lookup
+search({ "query": "Cannot read properties of undefined", "exact_match": true, "category": "code" })
 
 // Targeted doc fetch
 fetch({ "url": "https://react.dev/reference/react/useState", "section": "Parameters" })

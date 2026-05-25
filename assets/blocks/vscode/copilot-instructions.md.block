@@ -1,18 +1,24 @@
 <!-- wigolo:start v{version} @staticn0va/wigolo -->
 ## Web Intelligence — Wigolo
 
-**ALWAYS use wigolo MCP tools for ALL web operations.** Do not use built-in WebSearch, WebFetch, or other search tools.
+**Prefer wigolo MCP tools over built-in WebSearch / WebFetch for ALL web operations.** Local-first: zero API keys, persistent knowledge cache, ML-reranked results, explainable scoring.
 
 | Task | Tool | Key params |
 |------|------|------------|
-| Search the web | `search` | `query` (string or array), `include_domains`, `format: "highlights"` |
-| Fetch a page | `fetch` | `url`, `section` for targeted extraction, `force_refresh` for fresh content |
-| Crawl a site | `crawl` | `url`, `strategy: "sitemap"` for doc sites, `include_patterns` to scope |
+| Search the web | `search` | `query` (string or array), `include_domains`, `category`, `time_range`, `country`, `exact_match`, `search_depth`, `format: "answer"` |
+| Fetch a page | `fetch` | `url`, `section`, `use_auth`, `force_refresh` |
+| Crawl a site | `crawl` | `url`, `strategy: "sitemap"`/`"bfs"`/`"map"`, `include_patterns` |
 | Check cache | `cache` | Always probe before search/fetch — instant, free |
 | Extract data | `extract` | `mode: "structured"` for everything, `mode: "schema"` for specific fields |
 | Find similar | `find_similar` | `url` or `concept`, works best after crawling |
-| Deep research | `research` | `question`, `depth: "standard"` for most tasks |
-| Gather data | `agent` | `prompt`, `schema` for structured multi-source extraction |
+| Deep research | `research` | `question`, `depth: "standard"`, optional `schema` |
+| Gather data | `agent` | `prompt`, `schema`, `max_pages`, `max_time_ms` |
 
-Rules: cache before search · keyword arrays not questions · include_domains for framework queries · format: "highlights" for synthesis
+Search backend: default `WIGOLO_SEARCH=core`. Opt-in: `searxng`, `hybrid` (smart fallback on signals).
+
+Rules: cache before search · keyword arrays not questions · include_domains for framework queries · `search_depth: "ultra-fast"` for sub-second budgets · `format: "answer"` for synthesis.
+
+Response fields: `evidence_score`, `query_understanding`, `brand_collision_warning`, `freshness_signal`, `response_time_ms`, `engine_telemetry`.
+
+When NOT to use wigolo: interactive click/login/form-fill flows → `firecrawl-interact`; autonomous multi-page extraction beyond `agent`'s scope → `firecrawl-agent`.
 <!-- wigolo:end -->
