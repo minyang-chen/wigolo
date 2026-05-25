@@ -195,6 +195,7 @@ export class CoreSearchProvider implements SearchProvider {
             includeDomains: input.include_domains,
             excludeDomains: input.exclude_domains,
             includeScoreBreakdown: input.include_engine_outcomes,
+            country: input.country,
             timeRange: input.time_range,
             exactMatch: input.exact_match,
           }),

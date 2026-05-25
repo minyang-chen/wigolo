@@ -63,6 +63,9 @@ export interface OrchestratorInput {
   /** When true, each returned result carries a `_score_breakdown` field.
    * Wired from SearchInput.include_engine_outcomes at the provider layer. */
   includeScoreBreakdown?: boolean;
+  /** ISO 3166-1 alpha-2 country code. Threaded to engines that support a
+   * geographic boost; advisory, not a strict filter. */
+  country?: string;
   /** Caller-supplied freshness window. Overrides any date hint inferred
    * from the query text. Resolved to a `fromDate` relative to now and
    * passed to engines; results older than the window are post-filtered
@@ -235,6 +238,7 @@ export async function runV1Search(
     excludeDomains: input.excludeDomains,
     fromDate: effectiveFromDate,
     toDate: effectiveToDate,
+    country: input.country,
     timeRange: input.timeRange,
     category: vertical === 'general' ? undefined : vertical,
   };

@@ -210,6 +210,9 @@ export interface SearchInput {
   /** When true, the response carries per-engine timing + result counts under
    * engine_outcomes. Opt-in because the field is debug-shaped and noisy. */
   include_engine_outcomes?: boolean;
+  /** ISO 3166-1 alpha-2 country code (e.g. "us", "gb", "de"). Hint passed to
+   * engines that support a geographic boost; not a strict filter. */
+  country?: string;
   /** When true, the query is treated as a quoted phrase. Engines that
    * honour `"..."` filter to results containing the exact phrase, and
    * the orchestrator post-filters out any result whose title+snippet
@@ -470,6 +473,9 @@ export interface SearchEngineOptions {
   fromDate?: string;
   toDate?: string;
   category?: 'general' | 'news' | 'code' | 'docs' | 'papers' | 'images';
+  /** ISO 3166-1 alpha-2 country code. Passed to engines that support a
+   * geographic boost (Bing `cc=`, DDG `kl=`, Brave `country=`). Lower-case. */
+  country?: string;
 }
 
 export interface SearchEngine {
