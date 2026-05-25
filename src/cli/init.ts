@@ -170,27 +170,56 @@ async function runInitPlain(flags: InitFlagsResolved): Promise<number> {
     return 1;
   }
 
-  // Install instructions, skills, and commands for agents that support them
+  // Install instructions, skills, and commands for agents that support them.
+  // Each step has its own try/catch so a failure in one step does not cause
+  // the others to be reported as "skipped".
   {
     const { getAgentHandler } = await import('./agents/registry.js');
+    const { detectFirecrawlSkills } = await import('./agents/utils.js');
+    const { homedir } = await import('node:os');
+    const { join: pathJoin } = await import('node:path');
+
+    if (selected.includes('claude-code' as AgentId)) {
+      const firecrawl = detectFirecrawlSkills(pathJoin(homedir(), '.claude', 'skills'));
+      if (firecrawl.length > 0) {
+        out();
+        out(`  ${info(`Detected firecrawl skills (${firecrawl.join(', ')}).`)}`);
+        out(`    ${chalk.gray('Wigolo will be preferred for local/cached/transparent searches.')}`);
+        out(`    ${chalk.gray('See ~/.claude/skills/wigolo-search/SKILL.md for the boundaries.')}`);
+      }
+    }
+
     for (const id of selected) {
       const handler = getAgentHandler(id);
       if (!handler) continue;
+      out(`  Configuring ${handler.displayName}...`);
+
       try {
-        out(`  Configuring ${handler.displayName}...`);
         await handler.installInstructions();
         out(`  ${ok('Global instructions updated')}`);
-        if (handler.supportsSkills && handler.installSkills) {
-          await handler.installSkills();
-          out(`  ${ok('8 skills installed')}`);
-        }
-        if (handler.supportsCommands && handler.installCommand) {
-          await handler.installCommand();
-          out(`  ${ok('Command installed')}`);
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        out(`  ${warn(`Skills/instructions skipped: ${message}`)}`);
+        out(`  ${warn(`Instructions skipped: ${message}`)}`);
+      }
+
+      if (handler.supportsSkills && handler.installSkills) {
+        try {
+          await handler.installSkills();
+          out(`  ${ok('8 skills installed')}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          out(`  ${warn(`Skills skipped: ${message}`)}`);
+        }
+      }
+
+      if (handler.supportsCommands && handler.installCommand) {
+        try {
+          await handler.installCommand();
+          out(`  ${ok('Command installed')}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          out(`  ${warn(`Command skipped: ${message}`)}`);
+        }
       }
     }
   }

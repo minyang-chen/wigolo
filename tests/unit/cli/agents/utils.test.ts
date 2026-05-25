@@ -23,7 +23,7 @@ afterEach(() => {
 // mergeBlock
 // ---------------------------------------------------------------------------
 
-import { mergeBlock, removeBlock, mergeMcpJson, removeMcpJson } from '../../../../src/cli/agents/utils.js';
+import { mergeBlock, removeBlock, mergeMcpJson, removeMcpJson, detectFirecrawlSkills } from '../../../../src/cli/agents/utils.js';
 
 const BLOCK = '<!-- wigolo:start v1 -->\n## Wigolo\nContent here.\n<!-- wigolo:end -->';
 
@@ -98,6 +98,38 @@ describe('mergeBlock', () => {
     expect(endCount).toBe(1);
     expect(existsSync(filePath + '.wigolo-bak')).toBe(true);
   });
+
+  it('rotates an existing .wigolo-bak so a repeated interrupted install does not overwrite the prior backup', () => {
+    // First interrupted install leaves a `.wigolo-bak` with original user
+    // content. Second interrupted install must not clobber it.
+    const filePath = join(tmpDir, 'rotate.md');
+    const firstUser = '# Very Important Notes\n\n<!-- wigolo:start v0 -->\n';
+    writeFileSync(filePath, firstUser, 'utf-8');
+    mergeBlock(filePath, BLOCK);
+    expect(existsSync(filePath + '.wigolo-bak')).toBe(true);
+    expect(readFileSync(filePath + '.wigolo-bak', 'utf-8')).toContain('Very Important Notes');
+
+    // Second interrupted install: another orphan-start state shows up.
+    const secondUser = '# Different Notes\n\n<!-- wigolo:start v1 -->\n';
+    writeFileSync(filePath, secondUser, 'utf-8');
+    mergeBlock(filePath, BLOCK);
+
+    // Primary .wigolo-bak should still hold the first interrupted state.
+    expect(existsSync(filePath + '.wigolo-bak')).toBe(true);
+    const primary = readFileSync(filePath + '.wigolo-bak', 'utf-8');
+    // A rotated copy with a timestamp suffix must exist alongside.
+    const fs = require('node:fs');
+    const all = fs.readdirSync(tmpDir) as string[];
+    const rotated = all.filter((n: string) => n.startsWith('rotate.md.wigolo-bak.'));
+    expect(rotated.length).toBeGreaterThanOrEqual(1);
+
+    // Together the primary + rotated copies must contain BOTH the first and
+    // second user contents — no data lost.
+    const rotatedContents = rotated.map((n: string) => readFileSync(join(tmpDir, n), 'utf-8'));
+    const allBackups = [primary, ...rotatedContents].join('\n--\n');
+    expect(allBackups).toContain('Very Important Notes');
+    expect(allBackups).toContain('Different Notes');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -126,6 +158,25 @@ describe('removeBlock', () => {
     removeBlock(filePath);
     const content = readFileSync(filePath, 'utf-8');
     expect(content).toBe('# No block here\n');
+  });
+
+  it('unlinks the file when the wigolo block was the only content', () => {
+    // A CLAUDE.md that wigolo created on first install contains only the
+    // wigolo block. After uninstall the file would otherwise be left as a
+    // 0-byte stub — user-visible noise that needs manual cleanup.
+    const filePath = join(tmpDir, 'wigolo-only.md');
+    writeFileSync(filePath, BLOCK + '\n', 'utf-8');
+    const removed = removeBlock(filePath);
+    expect(removed).toBe(true);
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it('does not unlink the file when non-wigolo content remains', () => {
+    const filePath = join(tmpDir, 'mixed.md');
+    writeFileSync(filePath, '# Header\n\n' + BLOCK + '\n', 'utf-8');
+    removeBlock(filePath);
+    expect(existsSync(filePath)).toBe(true);
+    expect(readFileSync(filePath, 'utf-8')).toContain('# Header');
   });
 });
 
@@ -176,6 +227,31 @@ describe('removeMcpJson', () => {
 
   it('is noop when file does not exist', () => {
     expect(() => removeMcpJson(join(tmpDir, 'missing.json'), ['mcpServers', 'wigolo'])).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectFirecrawlSkills
+// ---------------------------------------------------------------------------
+
+describe('detectFirecrawlSkills', () => {
+  it('returns [] when skills dir does not exist', () => {
+    expect(detectFirecrawlSkills(join(tmpDir, 'no-skills'))).toEqual([]);
+  });
+
+  it('returns names of firecrawl skill directories', () => {
+    mkdirSync(join(tmpDir, 'skills', 'firecrawl'), { recursive: true });
+    mkdirSync(join(tmpDir, 'skills', 'firecrawl-search'), { recursive: true });
+    mkdirSync(join(tmpDir, 'skills', 'firecrawl-crawl'), { recursive: true });
+    mkdirSync(join(tmpDir, 'skills', 'wigolo'), { recursive: true });
+    mkdirSync(join(tmpDir, 'skills', 'unrelated'), { recursive: true });
+    const found = detectFirecrawlSkills(join(tmpDir, 'skills'));
+    expect(found).toEqual(['firecrawl', 'firecrawl-crawl', 'firecrawl-search']);
+  });
+
+  it('ignores names that merely contain "firecrawl" without the prefix', () => {
+    mkdirSync(join(tmpDir, 'skills', 'my-firecrawl-fork'), { recursive: true });
+    expect(detectFirecrawlSkills(join(tmpDir, 'skills'))).toEqual([]);
   });
 });
 

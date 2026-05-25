@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, lstatSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -47,6 +47,28 @@ export function readSkillDir(name: string): Record<string, string> {
 }
 
 /**
+ * If a backup file already exists at `bakPath`, rename it to a timestamped
+ * sibling so a subsequent backup write does not destroy the prior copy.
+ * Silent no-op when no backup exists or the rename fails — best-effort safety
+ * net for repeated interrupted installs.
+ */
+function rotateBackup(bakPath: string): void {
+  if (!existsSync(bakPath)) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  let target = `${bakPath}.${ts}`;
+  let suffix = 0;
+  while (existsSync(target)) {
+    suffix += 1;
+    target = `${bakPath}.${ts}-${suffix}`;
+  }
+  try {
+    renameSync(bakPath, target);
+  } catch {
+    // best-effort — leave the existing bak in place rather than crash
+  }
+}
+
+/**
  * Merge a block (delimited by wigolo:start/wigolo:end markers) into a file.
  * Creates the file if it doesn't exist.
  * Replaces an existing block, or appends if no block present.
@@ -83,6 +105,7 @@ export function mergeBlock(filePath: string, block: string): void {
   }
 
   if (hasStart !== hasEnd) {
+    rotateBackup(filePath + '.wigolo-bak');
     writeFileSync(filePath + '.wigolo-bak', content, 'utf-8');
 
     let salvaged = content;
@@ -111,7 +134,13 @@ export function mergeBlock(filePath: string, block: string): void {
   writeFileSync(filePath, trimmed + '\n\n' + block.trimEnd() + '\n', 'utf-8');
 }
 
-/** Remove the wigolo block from a file. Returns true if a block was removed. */
+/**
+ * Remove the wigolo block from a file. Returns true if a block was removed.
+ *
+ * If the block was the file's only content, the file is unlinked rather than
+ * left as a 0-byte stub. Symlinks are never unlinked — they may resolve to
+ * user content outside the file we own.
+ */
 export function removeBlock(filePath: string): boolean {
   if (!existsSync(filePath)) return false;
 
@@ -127,7 +156,27 @@ export function removeBlock(filePath: string): boolean {
   const after = content.slice(endIdx + END.length).trimStart();
   const parts = [before, after].filter(Boolean);
   const newContent = parts.join('\n\n');
-  writeFileSync(filePath, newContent ? newContent + '\n' : '', 'utf-8');
+
+  if (!newContent) {
+    let isSymlink = false;
+    try {
+      isSymlink = lstatSync(filePath).isSymbolicLink();
+    } catch {
+      isSymlink = false;
+    }
+    if (!isSymlink) {
+      try {
+        unlinkSync(filePath);
+        return true;
+      } catch {
+        // fall through to truncate
+      }
+    }
+    writeFileSync(filePath, '', 'utf-8');
+    return true;
+  }
+
+  writeFileSync(filePath, newContent + '\n', 'utf-8');
   return true;
 }
 
@@ -185,6 +234,24 @@ export function removeMcpJson(configPath: string, keyPath: string[]): void {
   delete obj[keyPath[keyPath.length - 1]];
 
   writeFileSync(configPath, JSON.stringify(root, null, 2) + '\n', 'utf-8');
+}
+
+/**
+ * Detect firecrawl skill directories already present in the given skills base.
+ * Used to print a disambiguation notice at install time so the user understands
+ * how wigolo and firecrawl skills will interact in the same agent host.
+ */
+export function detectFirecrawlSkills(skillsBase: string): string[] {
+  if (!existsSync(skillsBase)) return [];
+  let entries: string[];
+  try {
+    entries = readdirSync(skillsBase);
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((name) => name === 'firecrawl' || name.startsWith('firecrawl-'))
+    .sort();
 }
 
 /** Detect whether wigolo is installed globally and return the appropriate command. */
