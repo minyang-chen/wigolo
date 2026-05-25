@@ -38,7 +38,7 @@ describe('rankAgentSearchResults', () => {
 
     const ranked = rankAgentSearchResults(prompt, results);
     expect(ranked[0].url).toBe('https://github.com/modelcontextprotocol/servers');
-    expect(ranked.slice(0, 3).map((r) => r.url)).not.toContain(
+    expect(ranked[ranked.length - 1].url).toBe(
       'https://www.microsoft.com/en-us/microsoft-365/microsoft-lists',
     );
   });

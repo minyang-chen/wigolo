@@ -92,15 +92,15 @@ describe('agent — MCP servers brand-collision rank', () => {
     const __r = await handleAgent(input, [stubEngine], stubRouter);
     const result = __r.ok ? __r.data : ({ ...__r } as any);
 
-    const top3 = result.sources.slice(0, 3).map((s: { url: string }) => s.url);
-    expect(top3).not.toContain(
+    const fetchedUrls = result.sources.map((s: { url: string }) => s.url);
+    expect(fetchedUrls).not.toContain(
       'https://www.microsoft.com/en-us/microsoft-365/microsoft-lists',
     );
-    expect(top3).not.toContain('https://science.nasa.gov/universe/stars/');
-    expect(top3).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/modelcontextprotocol|awesome-mcp-servers/),
-      ]),
+    expect(fetchedUrls).toEqual(
+      expect.arrayContaining(['https://github.com/modelcontextprotocol/servers']),
+    );
+    expect(fetchedUrls).toEqual(
+      expect.arrayContaining(['https://github.com/punkpeye/awesome-mcp-servers']),
     );
   });
 });

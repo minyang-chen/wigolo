@@ -3,6 +3,7 @@ import { deduplicateResults, type MergedSearchResult } from '../search/dedup.js'
 import { getExtractProvider } from '../providers/extract-provider.js';
 import { cacheContent } from '../cache/store.js';
 import { rerankResults } from '../search/rerank.js';
+import { rankAgentSearchResults } from './rank.js';
 import { getConfig } from '../config.js';
 import type { AgentPlan } from './planner.js';
 import type { AgentSource, AgentStep, SearchEngine, RawSearchResult } from '../types.js';
@@ -146,7 +147,7 @@ export async function executeAgentPlan(
     // Phase 2: Execute search queries
     if (plan.searches.length > 0) {
       const searchStart = Date.now();
-      const searchResults = await executeSearches(plan.searches, engines, budget.deadlineMs);
+      const searchResults = await executeSearches(plan.searches, engines, budget.deadlineMs, prompt);
 
       steps.push({
         action: 'search',
@@ -230,6 +231,7 @@ async function executeSearches(
   queries: string[],
   engines: SearchEngine[],
   deadlineMs: number,
+  rankPrompt = '',
 ): Promise<Array<{ url: string; title: string; snippet: string; relevance_score: number }>> {
   const allRaw: RawSearchResult[] = [];
 
@@ -255,7 +257,13 @@ async function executeSearches(
   await Promise.allSettled(searchPromises);
 
   const merged = deduplicateResults(allRaw);
-  return merged.map((m) => ({
+  // Apply brand-collision rank (sub-ticket 2.7) so URLs are inserted into
+  // the executor's fetch queue in domain-quality + lexical-alignment order.
+  // The query used is the joined plan queries — the actual agent prompt is
+  // re-applied post-fetch via scoreAndFilterSources / rerankResults.
+  const rankQuery = rankPrompt.trim().length > 0 ? rankPrompt : queries.join(' ');
+  const ranked = rankAgentSearchResults(rankQuery, merged);
+  return ranked.map((m) => ({
     url: m.url,
     title: m.title,
     snippet: m.snippet,
