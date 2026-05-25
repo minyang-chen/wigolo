@@ -1,18 +1,39 @@
 <!-- wigolo:start v{version} @staticn0va/wigolo -->
 ## Web Intelligence — Wigolo
 
-**ALWAYS use wigolo MCP tools for ALL web operations.** Do not use built-in WebSearch, WebFetch, or other search tools.
+**Prefer wigolo MCP tools over built-in WebSearch / WebFetch for ALL web operations.** Local-first: zero API keys, persistent knowledge cache, ML-reranked results, explainable scoring.
 
 | Task | Tool | Key params |
 |------|------|------------|
-| Search the web | `search` | `query` (string or array for multi-query), `include_domains`, `format: "highlights"` |
-| Fetch a page | `fetch` | `url`, `section` for targeted extraction, `force_refresh` for current content |
-| Crawl a site | `crawl` | `url`, `strategy: "sitemap"` for doc sites, `include_patterns` to scope |
+| Search the web | `search` | `query` (string or array), `include_domains`, `exclude_domains`, `category`, `time_range`, `country`, `exact_match`, `search_depth`, `format: "answer"` |
+| Fetch a page | `fetch` | `url`, `section`, `use_auth`, `render_js`, `force_refresh` |
+| Crawl a site | `crawl` | `url`, `strategy: "sitemap"`/`"bfs"`/`"map"`, `include_patterns` |
 | Check cache | `cache` | Always probe before search/fetch — instant, free |
-| Extract data | `extract` | `mode: "structured"` gets tables + JSON-LD + definitions in one call |
-| Find similar | `find_similar` | `url` or `concept`, hybrid embedding + keyword + web fusion |
-| Deep research | `research` | `question`, `depth: "standard"`, optional `include_domains` |
-| Gather data | `agent` | `prompt`, optional `schema` for structured multi-source extraction |
+| Extract data | `extract` | `mode: "structured"` (tables + JSON-LD + definitions + chart hints in one call) |
+| Find similar | `find_similar` | `url` or `concept`, fused embedding + FTS5 + web; emits `cold_start` when local signals weak |
+| Deep research | `research` | `question`, `depth: "quick"`/`"standard"`/`"comprehensive"`, optional `schema` |
+| Gather data | `agent` | `prompt`, optional `schema`, `max_pages`, `max_time_ms` |
 
-Rules: cache before search · keyword arrays not natural language · include_domains for framework queries · format: "highlights" for answer synthesis
+### Search backend (`WIGOLO_SEARCH`)
+
+- `core` (default) — direct engines + RRF + ML rerank. Low latency, transparent provenance.
+- `searxng` — legacy aggregator, opt-in.
+- `hybrid` — `core` + auto-fallback to `searxng` on signal (brand collision, over-filter, all-engines-failed); merged response carries `fallback_signal`.
+
+### Rules
+
+1. Cache before search.
+2. Keyword arrays, not natural-language questions.
+3. `include_domains` for framework/library queries.
+4. `search_depth: 'ultra-fast'` for sub-second budgets; `'deep'` for max enrichment.
+5. `exact_match: true` for quoted phrases; `time_range` / `from_date`/`to_date` for recency.
+6. `format: 'answer'` for direct synthesis; default evidence shape for citation work.
+
+### Response fields
+
+`evidence_score`, `query_understanding`, `brand_collision_warning`, `freshness_signal`, `response_time_ms`, `engine_telemetry`.
+
+### When NOT to use wigolo
+
+Click/login/form-fill flows → `firecrawl-interact`. Autonomous multi-page extraction beyond `agent`'s scope → `firecrawl-agent`.
 <!-- wigolo:end -->
