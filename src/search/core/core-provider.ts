@@ -141,6 +141,8 @@ export class CoreSearchProvider implements SearchProvider {
       from_date: input.from_date,
       to_date: input.to_date,
       language: input.language,
+      time_range: input.time_range,
+      exact_match: input.exact_match,
     });
 
     let items: SearchResultItem[] = [];
@@ -194,6 +196,9 @@ export class CoreSearchProvider implements SearchProvider {
             includeDomains: input.include_domains,
             excludeDomains: input.exclude_domains,
             includeScoreBreakdown: input.include_engine_outcomes,
+            country: input.country,
+            timeRange: input.time_range,
+            exactMatch: input.exact_match,
           }),
         ),
       );
@@ -246,6 +251,8 @@ export class CoreSearchProvider implements SearchProvider {
         snippet: r.snippet,
         relevance_score: r.relevance_score,
         ...(r.published_date ? { published_date: r.published_date } : {}),
+        ...(r.image_url ? { image_url: r.image_url } : {}),
+        ...(r.image_alt ? { image_alt: r.image_alt } : {}),
         ...(r._score_breakdown ? { _score_breakdown: r._score_breakdown } : {}),
       }));
 
@@ -294,6 +301,16 @@ export class CoreSearchProvider implements SearchProvider {
       fetch_time_ms: fetchElapsed,
       ...(engineOutcomes ? { engine_outcomes: engineOutcomes } : {}),
     };
+
+    if (input.include_images) {
+      data.images = items
+        .filter((it) => typeof it.image_url === 'string' && it.image_url.length > 0)
+        .map((it) => ({
+          url: it.image_url!,
+          ...(it.image_alt ? { alt: it.image_alt } : {}),
+          source_url: it.url,
+        }));
+    }
 
     if (allDegraded) {
       data.warning = 'all engines failed or no results';
