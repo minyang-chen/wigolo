@@ -67,6 +67,8 @@ const CURRENCY_SYMBOLS: Array<[RegExp, string]> = [
 
 const TRACKING_IMAGE_HINTS = ['/tracking/', '/x-locale/', 'transparent-pixel'];
 
+const RESERVED_SPEC_KEY_RE = /^(__proto__|constructor|prototype)$/i;
+
 function isAmazonHost(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   if (AMAZON_HOSTS.has(lower)) return true;
@@ -222,11 +224,16 @@ function parseReviewCount(document: Document): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Soft cap so an adversarial page with thousands of <li> nodes cannot blow up
+// memory or downstream prompt budgets. Real Amazon pages cap out well below 100.
+const MAX_FEATURES = 100;
+
 function parseFeatures(document: Document): string[] {
   const items = document.querySelectorAll('#feature-bullets ul li .a-list-item, #feature-bullets ul li span');
   const seen = new Set<string>();
   const out: string[] = [];
   for (const el of Array.from(items)) {
+    if (out.length >= MAX_FEATURES) break;
     const text = textOf(el as Element);
     if (!text) continue;
     if (text.length < 3) continue;
@@ -267,20 +274,24 @@ function readOverviewRow(document: Document, labelRe: RegExp): string {
 }
 
 function parseOverviewSpecifications(document: Document): Record<string, string> {
-  const out: Record<string, string> = {};
+  // Object.create(null) — the value labels come from attacker-controllable HTML,
+  // so the container must not expose __proto__ / constructor as inherited slots.
+  const out: Record<string, string> = Object.create(null);
   const rows = document.querySelectorAll('#productOverview_feature_div table tr');
   for (const row of Array.from(rows)) {
     const cells = row.querySelectorAll('td');
     if (cells.length < 2) continue;
     const label = textOf(cells[0] as Element);
     const value = textOf(cells[1] as Element);
-    if (label && value) out[label] = value;
+    if (!label || !value) continue;
+    if (RESERVED_SPEC_KEY_RE.test(label)) continue;
+    out[label] = value;
   }
   return out;
 }
 
 function parseDetailBulletSpecifications(document: Document): Record<string, string> {
-  const out: Record<string, string> = {};
+  const out: Record<string, string> = Object.create(null);
   const items = document.querySelectorAll('#detailBullets_feature_div li, #detailBulletsWrapper_feature_div li');
   for (const li of Array.from(items)) {
     const raw = textOf(li as Element);
@@ -292,16 +303,22 @@ function parseDetailBulletSpecifications(document: Document): Record<string, str
     if (!m) continue;
     const key = m[1]!.trim();
     const value = m[2]!.trim();
-    if (key && value) out[key] = value;
+    if (!key || !value) continue;
+    if (RESERVED_SPEC_KEY_RE.test(key)) continue;
+    out[key] = value;
   }
   return out;
 }
 
 function parseSpecifications(document: Document): Record<string, string> {
-  return {
-    ...parseOverviewSpecifications(document),
-    ...parseDetailBulletSpecifications(document),
-  };
+  // Merge into a null-prototype object so spread cannot reintroduce reserved
+  // keys via the __proto__ setter on a plain literal.
+  const merged: Record<string, string> = Object.create(null);
+  const overview = parseOverviewSpecifications(document);
+  for (const k of Object.keys(overview)) merged[k] = overview[k]!;
+  const detail = parseDetailBulletSpecifications(document);
+  for (const k of Object.keys(detail)) merged[k] = detail[k]!;
+  return merged;
 }
 
 function parseImages(document: Document): string[] {

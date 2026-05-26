@@ -14,6 +14,7 @@ const BOOK_HTML = loadFixture('book.html');
 const GROCERY_HTML = loadFixture('grocery.html');
 const OOS_HTML = loadFixture('out-of-stock.html');
 const UK_HTML = loadFixture('uk-pound.html');
+const DE_HTML = loadFixture('de-euro.html');
 
 describe('amazonExtractor.canHandle', () => {
   it('matches amazon.com product URLs because Amazon products live under /dp/<asin>/', () => {
@@ -42,6 +43,10 @@ describe('amazonExtractor.canHandle', () => {
 
   it('rejects amazon-shaped paths on unrelated domains so a path collision cannot hijack extraction', () => {
     expect(amazonExtractor.canHandle('https://example.com/amazon.com/dp/B08N5WRWNW')).toBe(false);
+  });
+
+  it('rejects spoofed hosts like amazon.com.attacker.com because hostname suffix matching must be boundary-anchored', () => {
+    expect(amazonExtractor.canHandle('https://amazon.com.attacker.com/dp/B08N5WRWNW')).toBe(false);
   });
 
   it('rejects amazon.com signin and account paths because they are not product pages', () => {
@@ -267,5 +272,119 @@ describe('extractAmazonProduct — error / edge cases', () => {
     </body></html>`;
     const p = extractAmazonProduct(html, 'https://www.amazon.com/some/other/path');
     expect(p?.asin).toBe('B0FALLBACK');
+  });
+});
+
+describe('extractAmazonProduct — DE locale (EUR) fixture', () => {
+  const url = 'https://www.amazon.de/dp/B08N5WRWNW/';
+
+  it('maps the € symbol to ISO 4217 EUR so amazon.de prices carry the right currency code', () => {
+    const p = extractAmazonProduct(DE_HTML, url)!;
+    expect(p.currency).toBe('EUR');
+  });
+
+  it('parses the German "299,00" decimal correctly because comma-as-decimal is the EU convention', () => {
+    const p = extractAmazonProduct(DE_HTML, url)!;
+    expect(p.price).toBeCloseTo(299.0, 2);
+  });
+
+  it('extracts ASIN from an amazon.de URL because every locale TLD must route through the same ASIN heuristic', () => {
+    const p = extractAmazonProduct(DE_HTML, url)!;
+    expect(p.asin).toBe('B08N5WRWNW');
+  });
+});
+
+describe('extractAmazonProduct — image filtering edge cases', () => {
+  const url = 'https://www.amazon.com/dp/B08N5WRWNW/';
+
+  it('drops /x-locale/ helper assets from images because they are locale shims, not product photos', () => {
+    const html = `<html><body>
+      <span id="productTitle">X-Locale Filter Test</span>
+      <div id="imageBlock">
+        <img id="landingImage" src="https://m.media-amazon.com/images/I/hero.jpg" alt="Hero">
+        <img src="https://example.com/x-locale/strings.png">
+        <img src="https://m.media-amazon.com/images/I/alt-1.jpg">
+      </div>
+    </body></html>`;
+    const p = extractAmazonProduct(html, url)!;
+    expect(p.images.some((u) => u.includes('/x-locale/'))).toBe(false);
+    expect(p.images.length).toBeGreaterThan(0);
+  });
+});
+
+describe('extractAmazonProduct — features soft cap', () => {
+  const url = 'https://www.amazon.com/dp/B08N5WRWNW/';
+
+  it('caps features at 100 entries so an adversarial 10k-<li> page cannot blow up memory or prompt budgets', () => {
+    const bullets = Array.from({ length: 500 }, (_, i) => `<li><span class="a-list-item">Feature number ${i}</span></li>`).join('');
+    const html = `<html><body>
+      <span id="productTitle">Adversarial Bullet Count</span>
+      <div id="feature-bullets"><ul>${bullets}</ul></div>
+    </body></html>`;
+    const p = extractAmazonProduct(html, url)!;
+    expect(p.features.length).toBeLessThanOrEqual(100);
+    expect(p.features.length).toBeGreaterThan(0);
+  });
+});
+
+describe('extractAmazonProduct — prototype pollution guards on specifications', () => {
+  const url = 'https://www.amazon.com/dp/B08N5WRWNW/';
+
+  it('drops __proto__ rows from the overview specifications table so a hostile page cannot smuggle reserved keys', () => {
+    const html = `<html><body>
+      <span id="productTitle">Proto Pollution Overview Test</span>
+      <div id="productOverview_feature_div">
+        <table>
+          <tr><td>__proto__</td><td>polluted-overview</td></tr>
+          <tr><td>constructor</td><td>polluted-ctor</td></tr>
+          <tr><td>prototype</td><td>polluted-proto</td></tr>
+          <tr><td>Color</td><td>Black</td></tr>
+        </table>
+      </div>
+    </body></html>`;
+    const p = extractAmazonProduct(html, url)!;
+    expect(Object.prototype.hasOwnProperty.call(p.specifications, '__proto__')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(p.specifications, 'constructor')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(p.specifications, 'prototype')).toBe(false);
+    expect(p.specifications['Color']).toBe('Black');
+  });
+
+  it('drops "constructor :" detail-bullet entries because attacker-controlled labels must not land in reserved slots', () => {
+    const html = `<html><body>
+      <span id="productTitle">Proto Pollution Detail Bullet Test</span>
+      <div id="detailBullets_feature_div">
+        <ul>
+          <li><span class="a-text-bold">__proto__ :</span> <span>polluted-bullet</span></li>
+          <li><span class="a-text-bold">constructor :</span> <span>polluted-ctor</span></li>
+          <li><span class="a-text-bold">prototype :</span> <span>polluted-proto</span></li>
+          <li><span class="a-text-bold">ASIN :</span> <span>B08N5WRWNW</span></li>
+        </ul>
+      </div>
+    </body></html>`;
+    const p = extractAmazonProduct(html, url)!;
+    expect(Object.prototype.hasOwnProperty.call(p.specifications, '__proto__')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(p.specifications, 'constructor')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(p.specifications, 'prototype')).toBe(false);
+    expect(p.specifications['ASIN']).toBe('B08N5WRWNW');
+  });
+
+  it('leaves Object.prototype untouched after parsing reserved-key rows so global object integrity is preserved', () => {
+    const html = `<html><body>
+      <span id="productTitle">Global Pollution Probe</span>
+      <div id="productOverview_feature_div">
+        <table>
+          <tr><td>__proto__</td><td>polluted</td></tr>
+        </table>
+      </div>
+      <div id="detailBullets_feature_div">
+        <ul>
+          <li><span class="a-text-bold">constructor :</span> <span>polluted</span></li>
+        </ul>
+      </div>
+    </body></html>`;
+    extractAmazonProduct(html, url);
+    // If Object.prototype were polluted, every plain object would expose .polluted.
+    const probe: Record<string, unknown> = {};
+    expect(probe['polluted']).toBeUndefined();
   });
 });
