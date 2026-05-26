@@ -325,7 +325,8 @@ export const EXTRACT_TOOL_SCHEMA = {
     mode: {
       type: 'string',
       enum: ['selector', 'tables', 'metadata', 'schema', 'structured', 'brand'],
-      description: 'Extraction mode: selector (CSS), tables (HTML tables), metadata (meta tags + JSON-LD), schema (fields matching a JSON Schema), structured (tables + definition lists + JSON-LD + chart hints + key/value pairs — one-shot structured brief), brand (logo / favicon / colors / fonts / social links — stubbed until slice B2a lands)',
+      description:
+        'selector | tables | metadata | schema (LLM-sourced fields verified against source; hallucinated values returned as null) | structured | brand (logo/favicon/colors/fonts/social_links with provenance; favicons never promote to logo_url)',
     },
     css_selector: {
       type: 'string',
