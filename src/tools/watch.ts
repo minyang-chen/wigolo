@@ -20,6 +20,14 @@ const log = createLogger('cache');
 
 const MIN_INTERVAL_SECONDS = 60;
 
+/**
+ * Batch-create cap. The urls[] path runs guardUrl + a SQLite INSERT per
+ * entry; without an upper bound a single call can amplify into 100k+
+ * inserts and exhaust resources. PR #89 sec reviewer (LOW) — fail-closed
+ * here matches the existing badInput envelope for bad URLs.
+ */
+const MAX_WATCH_BATCH_SIZE = 1000;
+
 function badInput(reason: string, hint?: string): StageResult<WatchJobOutput> {
   return {
     ok: false,
@@ -109,6 +117,12 @@ export async function handleWatch(
     // Batch path: guard every URL up front so a single bad entry doesn't
     // leave half the batch persisted. Fail closed.
     const urls = input.urls!;
+    if (urls.length > MAX_WATCH_BATCH_SIZE) {
+      return badInput(
+        `watch create batch exceeds limit (${urls.length} > ${MAX_WATCH_BATCH_SIZE})`,
+        `Split the batch into chunks of at most ${MAX_WATCH_BATCH_SIZE} URLs.`,
+      );
+    }
     const guarded: ReturnType<typeof guardUrl>[] = [];
     for (const u of urls) {
       const g = guardUrl(u, 'url');

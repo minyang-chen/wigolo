@@ -109,6 +109,40 @@ describe('watch handler', () => {
       ]);
     });
 
+    // PR #89 sec reviewer (LOW): the batch urls[] path runs guardUrl +
+    // createJob (which is a SQLite INSERT) per URL. With no upper bound,
+    // a caller passing 100k URLs eats 100k inserts. Fail-closed here is
+    // cheap and matches the existing badInput envelope for bad URLs.
+    it('rejects an oversized batch (urls.length > MAX_WATCH_BATCH_SIZE)', async () => {
+      const router = mockRouter('');
+      const tooMany = Array.from({ length: 1001 }, (_, i) => `https://example.com/m17-cap-${i}`);
+      const r = await handleWatch(
+        { action: 'create', urls: tooMany, interval_seconds: 60 },
+        router,
+      );
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.error).toBe('invalid_input');
+        expect(r.error_reason).toMatch(/batch|limit|too many|1000/i);
+      }
+      // Defence in depth: no jobs should have been persisted.
+      const after = mustOk(await handleWatch({ action: 'list' }, router));
+      expect(after.jobs).toHaveLength(0);
+    });
+
+    it('accepts a batch at exactly MAX_WATCH_BATCH_SIZE (cap is inclusive)', async () => {
+      const router = mockRouter('');
+      const atLimit = Array.from({ length: 1000 }, (_, i) => `https://example.com/m17-atcap-${i}`);
+      const r = await handleWatch(
+        { action: 'create', urls: atLimit, interval_seconds: 60 },
+        router,
+      );
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.data.jobs).toHaveLength(1000);
+      }
+    });
+
     it('rejects passing both url and urls (ambiguous intent)', async () => {
       const router = mockRouter('hello');
       const r = await handleWatch(
