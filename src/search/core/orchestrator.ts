@@ -136,11 +136,12 @@ function matchesDomain(host: string, domain: string): boolean {
   return host === needle || host.endsWith(`.${needle}`);
 }
 
-// Surviving include_domains matches below this floor trigger a backfill from
-// the filtered-out pool so callers never get a single-result (or empty)
-// response when the request has results outside the include set. Tavily-equivalent.
-const SOFT_INCLUDE_FLOOR = 3;
-
+// include_domains is a HARD whitelist: any result whose hostname does not
+// match an entry is dropped (host-suffix match — `docs.foo.com` matches
+// `foo.com`). exclude_domains is the symmetric hard drop. Earlier versions
+// applied a soft floor that demoted off-domain results when matches were
+// below 3; that leaked off-domain URLs into responses and was the audit's C8
+// flaw. Hard enforcement matches Tavily semantics and what wigolo advertises.
 function applyDomainFilters(
   results: RawSearchResult[],
   includeDomains?: string[],
@@ -151,38 +152,18 @@ function applyDomainFilters(
   if (excludeDomains?.length) {
     filtered = filtered.filter((r) => {
       const host = hostnameOf(r.url);
+      if (!host) return false;
       return !excludeDomains.some((d) => matchesDomain(host, d));
     });
   }
 
   if (!includeDomains?.length) return filtered;
 
-  const matching: RawSearchResult[] = [];
-  const nonMatching: RawSearchResult[] = [];
-  for (const r of filtered) {
+  return filtered.filter((r) => {
     const host = hostnameOf(r.url);
-    if (includeDomains.some((d) => matchesDomain(host, d))) {
-      matching.push(r);
-    } else {
-      nonMatching.push(r);
-    }
-  }
-
-  if (matching.length >= SOFT_INCLUDE_FLOOR || nonMatching.length === 0) {
-    return matching;
-  }
-
-  // Demote non-matches so they always sort below the lowest-scored match.
-  const minMatchScore = matching.length > 0
-    ? Math.min(...matching.map((r) => r.relevance_score))
-    : 1;
-  const demoteCap = minMatchScore > 0 ? minMatchScore * 0.5 : 0.001;
-  const demoted = nonMatching.map((r) => ({
-    ...r,
-    relevance_score: Math.min(r.relevance_score, demoteCap),
-  }));
-
-  return [...matching, ...demoted];
+    if (!host) return false;
+    return includeDomains.some((d) => matchesDomain(host, d));
+  });
 }
 
 // Defensive per-engine dedup: keep first occurrence by URL.
@@ -282,6 +263,11 @@ export async function runV1Search(
   // from secondary engines (see sub-ticket 2.2).
   const urlPrimaryCount = new Map<string, number>();
   const urlSecondaryCount = new Map<string, number>();
+  // exact_match phrase awareness (audit C7): record every URL where at least
+  // one contributing engine's title+snippet contained the exact phrase. Used
+  // post-merge to filter without dropping URLs that another engine matched
+  // but whose first-seen variant (kept by urlToResult) happens not to match.
+  const urlExactMatchHit = new Set<string>();
 
   for (let i = 0; i < outcomes.length; i++) {
     const outcome = outcomes[i];
@@ -305,6 +291,10 @@ export async function runV1Search(
         urlSecondaryCount.set(r.url, (urlSecondaryCount.get(r.url) ?? 0) + 1);
       } else {
         urlPrimaryCount.set(r.url, (urlPrimaryCount.get(r.url) ?? 0) + 1);
+      }
+      if (exactPhrase) {
+        const hay = `${r.title} ${r.snippet}`.toLowerCase();
+        if (hay.includes(exactPhrase)) urlExactMatchHit.add(r.url);
       }
     }
   }
@@ -388,7 +378,14 @@ export async function runV1Search(
     });
   }
   if (exactPhrase) {
+    // C7: union of (urlExactMatchHit observed during ingest) ∪ (post-merge
+    // title+snippet match on the urlToResult variant). The post-merge check
+    // catches the case where engines were rewritten/reranked between ingest
+    // and this point; the ingest set rescues URLs whose preferred variant
+    // (kept by urlToResult, first-seen wins) didn't have the phrase but
+    // another engine's variant did.
     merged = merged.filter((r) => {
+      if (urlExactMatchHit.has(r.url)) return true;
       const hay = `${r.title} ${r.snippet}`.toLowerCase();
       return hay.includes(exactPhrase);
     });

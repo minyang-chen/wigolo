@@ -390,10 +390,12 @@ describe('runV1Search — brand-collision guard', () => {
 });
 
 describe('runV1Search — domain filters', () => {
-  it('returns includeDomains matches first and backfills below when matches are sparse', async () => {
-    // Soft include semantics: surviving matches sit at the top; if fewer than
-    // the floor survive we backfill non-matches below so callers never get an
-    // empty result set when results exist outside the include set.
+  it('hard-filters off-domain results even when matches are sparse (C8)', async () => {
+    // includeDomains is a HARD whitelist (slice S3 / audit C8). Earlier the
+    // orchestrator used a soft floor that backfilled non-matching domains
+    // when fewer than 3 matched. The audit found this leaked off-domain
+    // results, sometimes ranked above on-domain. Now: drop every off-domain
+    // result, even if only one in-domain hit survives.
     const { entry } = makeEntry({
       name: 'bing',
       results: [
@@ -409,13 +411,11 @@ describe('runV1Search — domain filters', () => {
       includeDomains: ['allowed.com'],
     });
     const hosts = out.results.map((r) => new URL(r.url).hostname);
-    // Matches are present and ranked above any backfill.
-    expect(hosts.slice(0, 2).sort()).toEqual(['allowed.com', 'sub.allowed.com']);
-    // Non-matching domain backfills only when matches < floor.
-    expect(hosts).toContain('denied.com');
+    expect(hosts.sort()).toEqual(['allowed.com', 'sub.allowed.com']);
+    expect(hosts).not.toContain('denied.com');
   });
 
-  it('does not backfill when matches already exceed the soft floor', async () => {
+  it('keeps in-domain results when matches exceed any size', async () => {
     const { entry } = makeEntry({
       name: 'bing',
       results: [
@@ -435,7 +435,10 @@ describe('runV1Search — domain filters', () => {
     expect(hosts.every((h) => h === 'allowed.com')).toBe(true);
   });
 
-  it('returns includeDomains backfill even when zero results match', async () => {
+  it('returns empty results when zero in-domain matches (no silent backfill) (C8)', async () => {
+    // Was: soft-floor backfilled non-matching results so callers got a
+    // non-empty response. Now: empty array is the correct answer; the caller
+    // sets the filter, the caller owns the empty case.
     const { entry } = makeEntry({
       name: 'bing',
       results: [
@@ -449,11 +452,10 @@ describe('runV1Search — domain filters', () => {
       query: 'general query',
       includeDomains: ['noresults.example'],
     });
-    expect(out.results.length).toBe(2);
-    expect(out.degraded).toBe(false);
+    expect(out.results).toEqual([]);
   });
 
-  it('still hard-strips URLs matching excludeDomains regardless of include soft mode', async () => {
+  it('still hard-strips URLs matching excludeDomains alongside includeDomains', async () => {
     const { entry } = makeEntry({
       name: 'bing',
       results: [
