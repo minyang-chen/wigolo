@@ -312,18 +312,24 @@ export class CoreSearchProvider implements SearchProvider {
       }
 
       const maxResults = input.max_results ?? processed.length;
-      items = processed.slice(0, maxResults).map((r) => ({
-        title: r.title,
-        url: r.url,
-        snippet: r.snippet,
-        relevance_score: r.relevance_score,
-        ...(r.published_date ? { published_date: r.published_date } : {}),
-        freshness_signal: computeFreshnessSignal(r.url, r.published_date),
-        ...(r.evidence_score ? { evidence_score: r.evidence_score } : {}),
-        ...(r.image_url ? { image_url: r.image_url } : {}),
-        ...(r.image_alt ? { image_alt: r.image_alt } : {}),
-        ...(r._score_breakdown ? { _score_breakdown: r._score_breakdown } : {}),
-      }));
+      items = processed.slice(0, maxResults).map((r) => {
+        const freshness = computeFreshnessSignal(r.url, r.published_date);
+        return {
+          title: r.title,
+          url: r.url,
+          snippet: r.snippet,
+          relevance_score: r.relevance_score,
+          ...(r.published_date ? { published_date: r.published_date } : {}),
+          // Slice 8 / L2: omit the field entirely when the freshness
+          // helper returns undefined (the "no parseable date" case) so the
+          // response shape stays clean.
+          ...(freshness ? { freshness_signal: freshness } : {}),
+          ...(r.evidence_score ? { evidence_score: r.evidence_score } : {}),
+          ...(r.image_url ? { image_url: r.image_url } : {}),
+          ...(r.image_alt ? { image_alt: r.image_alt } : {}),
+          ...(r._score_breakdown ? { _score_breakdown: r._score_breakdown } : {}),
+        };
+      });
 
       searchElapsed = Date.now() - start;
 
