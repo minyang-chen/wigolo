@@ -4,6 +4,7 @@ import {
   computeUnifiedDiff,
   computeHunks,
   DIFF_LINE_CAP,
+  DIFF_TOKEN_CAP,
 } from '../../../src/cache/diff-engine.js';
 import { MAX_DIFF_LINES } from '../../../src/cache/diff-summary.js';
 
@@ -200,6 +201,42 @@ describe('computeHunks', () => {
       // Words far from the change must not appear in hunks.
       expect(allHunkText).not.toContain('alpha');
       expect(allHunkText).not.toContain('zeta');
+    });
+
+    // PR #89 sec+perf reviewers (HIGH): the word-LCS path tokenises both
+    // sides and builds an LCS table of size (m+1)*(n+1). With ~25 tokens
+    // per line × 5000-line cap that is ~70k × 70k = ~5 GB of typed-array
+    // memory — exceeds typed-array max and crashes the MCP server. Caller-
+    // supplied markdown has no max-size guard at the tool boundary, so a
+    // large input is enough to OOM. The fix MUST: detect over-cap inputs,
+    // emit `truncated: true`, and fall back to line-granularity hunks
+    // (still useful, never throws).
+    it('caps word-LCS token count at DIFF_TOKEN_CAP and falls back to line hunks (PR #89 sec+perf)', () => {
+      // Construct inputs well above DIFF_TOKEN_CAP but well under the line
+      // cap so the line-granularity fallback can still run. Each line has
+      // ~12 tokens, so 500 lines × 12 ≈ 6000 tokens. We want to cross the
+      // cap, so generate enough lines.
+      const tokensPerLine = 60;
+      const linesNeeded = Math.ceil((DIFF_TOKEN_CAP + 1000) / tokensPerLine);
+      const lineTokens = Array.from({ length: tokensPerLine }, (_, i) => `t${i}`).join(' ');
+      const oldLines: string[] = [];
+      const newLines: string[] = [];
+      for (let i = 0; i < linesNeeded; i++) {
+        oldLines.push(`line${i} ${lineTokens}`);
+        newLines.push(i % 50 === 0 ? `LINE${i} ${lineTokens}` : `line${i} ${lineTokens}`);
+      }
+      const oldText = oldLines.join('\n');
+      const newText = newLines.join('\n');
+
+      // The expected guarantee: this MUST NOT throw, and MUST signal
+      // truncation. With the bug present (no cap) this allocation either
+      // throws (typed-array length too large) or OOMs.
+      const result = computeHunks(oldText, newText, 'word');
+      expect(result.truncated).toBe(true);
+      // Fallback to line-granularity: hunks must still be present and
+      // useful (narrower than nothing). Line cap is 5000; our input is
+      // well under that, so line-LCS works fine.
+      expect(result.summary.added_lines + result.summary.removed_lines + result.summary.modified_lines).toBeGreaterThan(0);
     });
   });
 });

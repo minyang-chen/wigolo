@@ -335,5 +335,35 @@ describe('handleDiff', () => {
         expect(r.data.summary).toBeDefined();
       }
     });
+
+    // PR #89 sec+perf reviewers (HIGH): callers can pass markdown whose
+    // token count blows past the safe LCS table size even when line count
+    // is well under DIFF_LINE_CAP. The tool boundary MUST return a
+    // structured envelope with `truncated:true`, never crash. This pins
+    // the integration: input → handleDiff → envelope with truncation.
+    it('returns truncated:true (never throws) for oversized word-granularity input', async () => {
+      // ~60 tokens/line × 1000 lines = 60k tokens — over DIFF_TOKEN_CAP
+      // (50k) yet well under DIFF_LINE_CAP (5000). Without the guard the
+      // word-LCS path would attempt a 60k×60k Uint32Array (~14 GB).
+      const tokensPerLine = 60;
+      const tokenRow = Array.from({ length: tokensPerLine }, (_, i) => `t${i}`).join(' ');
+      const oldLines: string[] = [];
+      const newLines: string[] = [];
+      for (let i = 0; i < 1000; i++) {
+        oldLines.push(`line${i} ${tokenRow}`);
+        newLines.push(i === 500 ? `LINE${i} ${tokenRow}` : `line${i} ${tokenRow}`);
+      }
+      const r = await handleDiff({
+        old: { markdown: oldLines.join('\n') },
+        new: { markdown: newLines.join('\n') },
+        output: 'hunks',
+        granularity: 'word',
+      });
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.data.truncated).toBe(true);
+        expect(r.data.summary).toBeDefined();
+      }
+    });
   });
 });

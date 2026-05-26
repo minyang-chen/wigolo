@@ -12,6 +12,18 @@ const log = createLogger('cache');
  */
 export const DIFF_LINE_CAP = 5000;
 
+/**
+ * Token cap for word-granularity LCS. The LCS DP table is O(m*n) — at
+ * 5000-line cap a page averaging ~25 tokens/line could reach ~125k tokens
+ * per side, producing a ~15.6-billion-cell table (~62 GB at 4 bytes/cell)
+ * that crashes the MCP server outright. PR #89 sec+perf reviewers flagged
+ * this as HIGH. At 50k tokens per side the table is ~10 GB-virtual /
+ * realistic-sparse-write — still a lot, but inside what V8 can lazily
+ * back. Inputs over the cap fall back to line-granularity hunks and the
+ * envelope carries `truncated: true` so callers see the degrade.
+ */
+export const DIFF_TOKEN_CAP = 50_000;
+
 const UNIFIED_CONTEXT = 3;
 
 function normalizeLineEndings(text: string): string {
@@ -415,6 +427,37 @@ function tokenizeWords(text: string): string[] {
 function computeWordHunks(oldText: string, newText: string): HunksResult {
   const oldTokens = tokenizeWords(oldText);
   const newTokens = tokenizeWords(newText);
+
+  // PR #89 sec+perf reviewers (HIGH): word-LCS is O(m*n) in token count.
+  // Without this cap a caller passing a few hundred KB of text can OOM the
+  // server (table cells = (m+1)*(n+1) × 4 bytes). Fall back to
+  // line-granularity hunks — still useful, never throws — and signal
+  // truncation so the caller sees the degrade.
+  if (oldTokens.length > DIFF_TOKEN_CAP || newTokens.length > DIFF_TOKEN_CAP) {
+    log.debug('diff-engine: word-token cap exceeded, falling back to line granularity', {
+      oldTokenCount: oldTokens.length,
+      newTokenCount: newTokens.length,
+      cap: DIFF_TOKEN_CAP,
+    });
+    const oldLines = splitLines(oldText);
+    const newLines = splitLines(newText);
+    // Line cap might also bite — if so emit an approximate summary like
+    // the line path does. Otherwise run line-LCS to produce real hunks.
+    if (oldLines.length > DIFF_LINE_CAP || newLines.length > DIFF_LINE_CAP) {
+      return {
+        hunks: [],
+        truncated: true,
+        summary: approximateSummaryForTruncated(oldLines, newLines),
+      };
+    }
+    const lineFallback = computeHunks(oldText, newText, 'line');
+    return {
+      hunks: lineFallback.hunks,
+      truncated: true,
+      summary: lineFallback.summary,
+    };
+  }
+
   const ops = buildEditScript(oldTokens, newTokens);
 
   // Group consecutive non-equal ops into a single hunk. Each hunk's
