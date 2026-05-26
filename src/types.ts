@@ -514,7 +514,7 @@ export interface SearchOutput {
 }
 
 export interface QueryUnderstanding {
-  intent: 'general' | 'news' | 'code' | 'docs' | 'papers';
+  intent: 'general' | 'news' | 'code' | 'docs' | 'papers' | 'images';
   entities: string[];
   date_hint: { fromDate?: string; toDate?: string } | null;
   language: string;
