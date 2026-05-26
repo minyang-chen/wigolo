@@ -60,12 +60,31 @@ export function getSourceText(html: string): string {
  *
  * Returns `false` when the value is not derivable from source — meaning the
  * LLM hallucinated and the caller should null the field.
+ *
+ * This is a thin wrapper that normalizes `sourceText` once and delegates to
+ * `verifyAgainstNormalizedSource`. Hot-path callers that verify many fields
+ * against the same source MUST normalize once at the call boundary and use
+ * `verifyAgainstNormalizedSource` directly — see `applyEvidenceFilter`.
  */
 export function verifyAgainstSource(value: unknown, sourceText: string): boolean {
   if (value === null || value === undefined) return true;
   if (!sourceText) return false;
+  return verifyAgainstNormalizedSource(value, normalize(sourceText));
+}
 
-  const haystack = normalize(sourceText);
+/**
+ * Internal hot-path verifier: takes an ALREADY-normalized haystack so the
+ * caller can cache the O(N*HTML) work across many fields. The per-value
+ * `normalize(String(value))` is still done here — that's bounded by value
+ * length, not source length, and is unavoidable.
+ *
+ * Contract: `haystack` MUST be the output of `normalize(sourceText)`. Pass
+ * `''` for an empty/missing source — the function returns false for any
+ * non-null value, matching `verifyAgainstSource`'s behavior.
+ */
+function verifyAgainstNormalizedSource(value: unknown, haystack: string): boolean {
+  if (value === null || value === undefined) return true;
+  if (!haystack) return false;
 
   if (typeof value === 'string') {
     const needle = normalize(value);
@@ -127,10 +146,15 @@ export function applyEvidenceFilter(
   const out: Record<string, unknown> = { ...input.values };
   const rejected: string[] = [];
 
+  // Normalize the haystack ONCE — the per-field loop below would otherwise
+  // re-run an O(N*HTML) normalize for every field. See file-level comment
+  // ("Cached at the call boundary; re-computing per field would be O(N*HTML).").
+  const haystack = input.sourceText ? normalize(input.sourceText) : '';
+
   for (const key of input.fields) {
     const v = out[key];
     if (v === null || v === undefined) continue;
-    if (!verifyAgainstSource(v, input.sourceText)) {
+    if (!verifyAgainstNormalizedSource(v, haystack)) {
       out[key] = null;
       rejected.push(key);
     }
