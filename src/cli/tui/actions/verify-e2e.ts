@@ -15,16 +15,16 @@
  *   and config-writer.ts key-path knowledge.
  * - hardFailureCount counts only 'fail' results — 'skipped' is not a failure.
  *
- * SP4 seam: the synthesis probe loads `resolveProviderKey` from SP4's
- * `src/security/key-store.ts` via a variable-specifier dynamic import. If SP4
- * hasn't landed the import returns null and the probe falls back to an env-var
- * check. TODO(SP4-merged): import resolveProviderKey statically once SP4 is on
- * main and drop the env-var fallback.
+ * SP4 seam: the synthesis probe resolves a provider key via SP4's
+ * `resolveProviderKey(provider, { dataDir })` (keychain → encrypted file →
+ * env). When no provider has a resolvable key, synthesis is skipped-with-
+ * reason rather than failed.
  */
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { resolveProviderKey } from '../../../security/key-store.js';
 import type { AgentId, InstallType } from '../agents.js';
 
 // ---------------------------------------------------------------------------
@@ -311,7 +311,7 @@ export async function buildDefaultDeps(): Promise<VerifyEndToEndDeps> {
     probeSearch: buildDefaultSearchProbe(),
     probeFetch: buildDefaultFetchProbe(),
     probeExtract: buildDefaultExtractProbe(),
-    probeSynthesis: await buildDefaultSynthesisProbe(),
+    probeSynthesis: buildDefaultSynthesisProbe(),
     probeMcpWiring: buildDefaultMcpWiringProbe(),
   };
 }
@@ -402,66 +402,31 @@ function buildDefaultExtractProbe(): () => Promise<CapabilityResult> {
   };
 }
 
-async function buildDefaultSynthesisProbe(): Promise<() => Promise<CapabilityResult>> {
+function buildDefaultSynthesisProbe(): () => Promise<CapabilityResult> {
   const SYNTHESIS_SKIP_DETAIL =
-    'no provider key configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY to enable synthesis';
-
-  // SP4 seam: SP4 ships `resolveProviderKey(provider, { dataDir })` from
-  // `src/security/key-store.ts` (keychain → encrypted file → env). We load it
-  // through a VARIABLE specifier so tsc never resolves the path at compile time
-  // (the module doesn't exist on this branch yet). When SP4 hasn't merged the
-  // import returns null and we fall through to the env-var check.
-  // TODO(SP4-merged): import resolveProviderKey directly from
-  //   '../../../security/key-store.js' and drop the variable-specifier dance +
-  //   env-var fallback once SP4 is on main.
-  type ResolveProviderKey = (
-    provider: string,
-    opts: { dataDir: string },
-  ) => Promise<string | undefined>;
-  let resolveProviderKey: ResolveProviderKey | undefined;
-  {
-    const seamSpec = '../../../security/key-store.js';
-    const mod = await import(seamSpec).catch(() => null);
-    const candidate = (mod as { resolveProviderKey?: unknown } | null)?.resolveProviderKey;
-    if (typeof candidate === 'function') {
-      resolveProviderKey = candidate as ResolveProviderKey;
-    }
-  }
+    'no provider key configured — add a provider key via `wigolo config` (or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY) to enable synthesis';
 
   return async (): Promise<CapabilityResult> => {
-    // Determine if any provider key is available
-    let hasKey = false;
+    // Resolve a provider key through SP4's secure key store (keychain →
+    // encrypted file → env). If no provider has a resolvable key, synthesis is
+    // an optional capability we skip-with-reason rather than fail.
+    const { getConfig } = await import('../../../config.js');
+    const dataDir = getConfig().dataDir;
+    const { allProviders } = await import('../../../integrations/cloud/llm/select.js');
 
-    if (resolveProviderKey) {
-      // SP4 seam available
-      const { getConfig } = await import('../../../config.js');
-      const dataDir = getConfig().dataDir;
-      const { allProviders } = await import('../../../integrations/cloud/llm/select.js');
-      for (const provider of allProviders()) {
-        const key = await resolveProviderKey(provider, { dataDir }).catch(() => undefined);
-        if (key) { hasKey = true; break; }
-      }
-    } else {
-      // Fallback: check well-known env vars directly
-      const PROVIDER_KEYS = [
-        'ANTHROPIC_API_KEY',
-        'OPENAI_API_KEY',
-        'GEMINI_API_KEY',
-        'GROQ_API_KEY',
-      ];
-      hasKey = PROVIDER_KEYS.some((k) => !!process.env[k]);
+    let keyedProvider: string | null = null;
+    for (const provider of allProviders()) {
+      const key = await resolveProviderKey(provider, { dataDir }).catch(() => undefined);
+      if (key) { keyedProvider = provider; break; }
     }
 
-    if (!hasKey) {
+    if (!keyedProvider) {
       return { capability: 'synthesis', status: 'skipped', detail: SYNTHESIS_SKIP_DETAIL };
     }
 
     try {
       const { selectProvider } = await import('../../../integrations/cloud/llm/select.js');
-      const active = selectProvider(process.env);
-      if (!active) {
-        return { capability: 'synthesis', status: 'skipped', detail: SYNTHESIS_SKIP_DETAIL };
-      }
+      const active = selectProvider(process.env) ?? keyedProvider;
       // Probe with a minimal prompt
       const { runLlmText } = await import('../../../integrations/cloud/llm/run.js');
       const response = await runLlmText({
