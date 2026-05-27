@@ -11,7 +11,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  lint-build-unit:
+    name: lint + build + unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci
+
+      - name: Lint (tsc --noEmit)
+        shell: bash
+        run: npm run lint
+
+      - name: Build
+        shell: bash
+        run: npm run build
+
+      - name: Unit tests
+        shell: bash
+        run: npm run test:unit
+
+  full-suite:
+    name: full test suite (ubuntu)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
