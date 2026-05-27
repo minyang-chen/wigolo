@@ -16,10 +16,9 @@
  */
 import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { TextInput } from '@inkjs/ui';
+import { PasswordInput } from '@inkjs/ui';
 import { keychainAvailable } from '../../../security/keychain.js';
-import { storeProviderKey, readProviderKey, maskValue, PICKER_PROVIDERS } from '../actions/provider-keys.js';
-import { writePersistedConfig, defaultConfigPath } from '../../../persisted-config.js';
+import { readProviderKey, saveProviderSelection, PICKER_PROVIDERS } from '../actions/provider-keys.js';
 import { getConfig } from '../../../config.js';
 import type { LLMProvider } from '../../../integrations/cloud/llm/types.js';
 
@@ -98,39 +97,17 @@ export function ProviderSetup({
     setStep('saving');
     setStatusMsg('Saving...');
 
-    if (provider === 'custom') {
-      // Custom URL goes to config.json, not keystore
-      try {
-        writePersistedConfig(defaultConfigPath(), {
-          provider: { name: 'custom', keyLocation: 'env' },
-          settings: { WIGOLO_LLM_PROVIDER: value.trim() },
-        });
-        setStatusMsg(`Custom URL saved to config`);
-        setStoredLocation(null);
-        setStep('done');
-      } catch (err) {
-        setStatusMsg(`Failed: ${err instanceof Error ? err.message : String(err)}`);
-        setStep('enter-key');
-      }
-      return;
-    }
-
-    try {
-      const result = await storeProviderKey(provider as LLMProvider, value.trim(), { dataDir });
-      if (result.ok && result.location) {
-        // Persist provider + keyLocation to config.json (never the key itself)
-        writePersistedConfig(defaultConfigPath(), {
-          provider: { name: provider, keyLocation: result.location },
-        });
-        setStoredLocation(result.location);
-        setStatusMsg(`Key stored in ${result.location}`);
-        setStep('done');
-      } else {
-        setStatusMsg(`Failed: ${result.error ?? 'unknown error'}`);
-        setStep('enter-key');
-      }
-    } catch (err) {
-      setStatusMsg(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+    // All side-effecting save logic lives in the action; the component just
+    // renders the result (thin-handler pattern; keeps secrets out of the view).
+    const result = await saveProviderSelection(provider, value.trim(), { dataDir });
+    if (result.ok) {
+      setStoredLocation(result.location);
+      setStatusMsg(
+        result.location ? `Key stored in ${result.location}` : 'Custom URL saved to config',
+      );
+      setStep('done');
+    } else {
+      setStatusMsg(`Failed: ${result.error ?? 'unknown error'}`);
       setStep('enter-key');
     }
   }, [dataDir]);
@@ -204,7 +181,7 @@ export function ProviderSetup({
         )}
         <Text dimColor>{hint}</Text>
         <Box marginTop={1}>
-          <TextInput
+          <PasswordInput
             placeholder="Enter key..."
             onChange={setKeyInput}
             onSubmit={(val) => {

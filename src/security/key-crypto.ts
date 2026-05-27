@@ -19,8 +19,8 @@
  */
 
 import { scrypt as _scrypt, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { writeFileSync, readFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const FORMAT_VERSION = 1;
 const SALT_LEN = 32;
@@ -96,7 +96,13 @@ export async function decryptSecret(blob: string, machineId: string): Promise<st
 
 /**
  * Encrypt a secret and write it atomically to filePath with 0o600 permissions.
- * Creates parent directories if they don't exist.
+ *
+ * Atomic: writes to a temp file (also 0o600 — no world-readable window) then
+ * renames over the target. A crash mid-write leaves the temp file, never a
+ * truncated/corrupt key file that would be silently discarded on next read.
+ *
+ * The parent directory is created 0o700 so a directory listing does not leak
+ * which providers are configured.
  */
 export async function encryptToFile(
   plaintext: string,
@@ -104,8 +110,18 @@ export async function encryptToFile(
   filePath: string,
 ): Promise<void> {
   const blob = await encryptSecret(plaintext, machineId);
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, blob, { encoding: 'utf8', mode: 0o600 });
+  const dir = dirname(filePath);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+
+  const tmp = join(dir, `.${randomBytes(8).toString('hex')}.tmp`);
+  try {
+    writeFileSync(tmp, blob, { encoding: 'utf8', mode: 0o600 });
+    renameSync(tmp, filePath);
+  } catch (err) {
+    // Best-effort cleanup of the temp file on failure.
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+    throw err;
+  }
 }
 
 /**
