@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -25,6 +25,21 @@ export interface PersistedConfig {
 /** Patch type for writePersistedConfig. All fields optional (merge-patch). */
 export type PersistedConfigPatch = Partial<Omit<PersistedConfig, 'version'>>;
 
+/**
+ * Settings keys that map to secret values in the runtime config and must NEVER
+ * be persisted to config.json. These are config.json-readable in config.ts, so
+ * without this guard a caller could round-trip an API key onto disk in plain
+ * text. Strip them on the write path. Keys go to the keychain/env only.
+ */
+export const SETTINGS_SECRETS_DENYLIST = new Set<string>(['braveApiKey', 'githubToken']);
+
+/** File mode for config.json — owner read/write only (no group/other). */
+const CONFIG_FILE_MODE = 0o600;
+
+/** Upper bound on config.json size; a larger file is treated as corrupt and
+ * skipped rather than parsed (cheap DoS / accidental-blob guard). */
+const MAX_CONFIG_BYTES = 1_000_000;
+
 // ---------------------------------------------------------------------------
 // Cache
 // ---------------------------------------------------------------------------
@@ -42,6 +57,22 @@ export function resetPersistedConfig(): void {
 // Migration
 // ---------------------------------------------------------------------------
 
+/**
+ * Reconstruct a PersistedProvider from ONLY the `name` + `keyLocation` fields,
+ * dropping any other (potentially secret) field a hand-crafted config.json may
+ * carry. Returns undefined when the input is not a usable provider object.
+ */
+function sanitizeProvider(raw: unknown): PersistedProvider | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.name !== 'string') return undefined;
+  const keyLocation =
+    obj.keyLocation === 'keychain' || obj.keyLocation === 'file' || obj.keyLocation === 'env'
+      ? obj.keyLocation
+      : 'env';
+  return { name: obj.name, keyLocation };
+}
+
 function migrateToV1(raw: Record<string, unknown>): PersistedConfig {
   // Extract all top-level keys that aren't structural as settings.
   const { version: _v, settings: _s, provider: _p, ...rest } = raw as {
@@ -51,10 +82,11 @@ function migrateToV1(raw: Record<string, unknown>): PersistedConfig {
     [k: string]: unknown;
   };
   const existingSettings = typeof _s === 'object' && _s !== null ? (_s as Record<string, unknown>) : {};
+  const provider = sanitizeProvider(_p);
   return {
     version: PERSISTED_CONFIG_VERSION,
     settings: { ...rest, ...existingSettings },
-    ...(_p ? { provider: _p as PersistedProvider } : {}),
+    ...(provider ? { provider } : {}),
   };
 }
 
@@ -73,7 +105,8 @@ function parseAndMigrate(raw: Record<string, unknown>): PersistedConfig {
       ? (raw.settings as Record<string, unknown>)
       : {};
     const result: PersistedConfig = { version: rawVersion, settings };
-    if (raw.provider) result.provider = raw.provider as PersistedProvider;
+    const provider = sanitizeProvider(raw.provider);
+    if (provider) result.provider = provider;
     return result;
   }
 
@@ -87,8 +120,28 @@ function parseAndMigrate(raw: Record<string, unknown>): PersistedConfig {
     ? (raw.settings as Record<string, unknown>)
     : {};
   const result: PersistedConfig = { version: rawVersion, settings };
-  if (raw.provider) result.provider = raw.provider as PersistedProvider;
+  const provider = sanitizeProvider(raw.provider);
+  if (provider) result.provider = provider;
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Internal atomic writer (shared by public write + migration write-back)
+// ---------------------------------------------------------------------------
+
+/**
+ * Atomically serialize `cfg` to `configPath` (temp file + rename) with
+ * owner-only (0o600) permissions. Does NOT read or merge — the caller passes
+ * the fully-resolved object. Kept private so the migration write-back can reuse
+ * it without re-triggering a migrating read (recursion guard).
+ */
+function atomicWrite(configPath: string, cfg: PersistedConfig): void {
+  const dir2 = dirname(configPath);
+  mkdirSync(dir2, { recursive: true });
+
+  const tmp = join(dir2, `.config-${randomBytes(6).toString('hex')}.tmp`);
+  writeFileSync(tmp, JSON.stringify(cfg, null, 2), { mode: CONFIG_FILE_MODE });
+  renameSync(tmp, configPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,8 +152,11 @@ function parseAndMigrate(raw: Record<string, unknown>): PersistedConfig {
  * Read and cache the persisted config from `configPath`.
  * - Missing file → returns `{ version: CURRENT, settings: {} }`.
  * - Unparseable JSON → returns `{ version: CURRENT, settings: {} }`.
- * - Legacy (version-less) → migrates to current version in memory.
- * - Future version → reads as-is, tolerates unknown fields.
+ * - Legacy (version-less) or version < CURRENT → migrates in memory AND writes
+ *   the upgraded envelope back to disk atomically (spec §Migration). The
+ *   write-back uses the private `atomicWrite` so it never re-enters this
+ *   reader (recursion guard).
+ * - Future version → reads as-is, tolerates unknown fields, no rewrite.
  * Results are cached per-process; call `resetPersistedConfig()` in tests.
  */
 export function readPersistedConfig(configPath: string): PersistedConfig {
@@ -112,6 +168,20 @@ export function readPersistedConfig(configPath: string): PersistedConfig {
     return _cache;
   }
 
+  // Size-cap before reading the whole file into memory.
+  try {
+    if (statSync(configPath).size > MAX_CONFIG_BYTES) {
+      process.stderr.write(
+        `[wigolo] config.json at ${configPath} exceeds ${MAX_CONFIG_BYTES} bytes; ignoring it.\n`,
+      );
+      _cache = { version: PERSISTED_CONFIG_VERSION, settings: {} };
+      _cachePath = configPath;
+      return _cache;
+    }
+  } catch {
+    // stat failure → fall through to read attempt (which will also fail safe).
+  }
+
   let raw: Record<string, unknown>;
   try {
     raw = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
@@ -121,45 +191,67 @@ export function readPersistedConfig(configPath: string): PersistedConfig {
     return _cache;
   }
 
-  _cache = parseAndMigrate(raw);
+  const rawVersion = typeof raw.version === 'number' ? raw.version : undefined;
+  if (rawVersion !== undefined && rawVersion > PERSISTED_CONFIG_VERSION) {
+    process.stderr.write(
+      `[wigolo] config.json version ${rawVersion} is newer than this build supports ` +
+        `(${PERSISTED_CONFIG_VERSION}); reading known fields only.\n`,
+    );
+  }
+  const parsed = parseAndMigrate(raw);
+
+  // Write-back only when we actually upgraded a stale/legacy file. A
+  // version-less file (rawVersion === undefined) or any version below CURRENT
+  // gets persisted in the new envelope. Files already at CURRENT or in the
+  // future are left untouched (no churn, no downgrade).
+  const wasUpgraded = rawVersion === undefined || rawVersion < PERSISTED_CONFIG_VERSION;
+  if (wasUpgraded) {
+    try {
+      atomicWrite(configPath, parsed);
+    } catch {
+      // Best-effort: a read-only filesystem must not break reads. The in-memory
+      // migrated value is still returned; we just skip persisting the upgrade.
+    }
+  }
+
+  _cache = parsed;
   _cachePath = configPath;
   return _cache;
 }
 
 /**
- * Write a merge-patch to the persisted config atomically (temp file + rename).
- * Merge-patch semantics: only keys present in `patch.settings` are updated;
- * keys absent from the patch are preserved from the current file.
+ * Write a merge-patch to the persisted config atomically (temp file + rename,
+ * 0o600 permissions). Merge-patch semantics: only keys present in
+ * `patch.settings` are updated; keys absent from the patch are preserved.
  *
- * Secrets guard: any `key` field inside `patch.provider` is silently stripped
- * — only `name` and `keyLocation` are serialized.
+ * Secrets guard:
+ *   - any `key` field inside `patch.provider` is stripped — only `name` and
+ *     `keyLocation` are serialized.
+ *   - any denylisted secret settings key (SETTINGS_SECRETS_DENYLIST) is
+ *     stripped from `patch.settings` before merge — API keys never hit disk.
  */
 export function writePersistedConfig(configPath: string, patch: PersistedConfigPatch): void {
   // Read current (may be empty default)
   const current = readPersistedConfig(configPath);
 
+  // Strip denylisted secret keys from the incoming settings patch.
+  const patchSettings: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch.settings ?? {})) {
+    if (SETTINGS_SECRETS_DENYLIST.has(k)) continue;
+    patchSettings[k] = v;
+  }
+
   // Merge settings
   const merged: PersistedConfig = {
     version: PERSISTED_CONFIG_VERSION,
-    settings: { ...current.settings, ...(patch.settings ?? {}) },
+    settings: { ...current.settings, ...patchSettings },
   };
 
-  // Merge provider — strip secrets
-  const rawProvider = patch.provider ?? current.provider;
-  if (rawProvider) {
-    merged.provider = {
-      name: rawProvider.name,
-      keyLocation: rawProvider.keyLocation,
-      // Explicitly omit any secret fields that should never be persisted
-    };
-  }
+  // Merge provider — reconstruct from name + keyLocation only (drops secrets).
+  const provider = sanitizeProvider(patch.provider ?? current.provider);
+  if (provider) merged.provider = provider;
 
-  const dir2 = dirname(configPath);
-  mkdirSync(dir2, { recursive: true });
-
-  const tmp = join(dir2, `.config-${randomBytes(6).toString('hex')}.tmp`);
-  writeFileSync(tmp, JSON.stringify(merged, null, 2));
-  renameSync(tmp, configPath);
+  atomicWrite(configPath, merged);
 
   // Invalidate cache so next read sees the new file.
   _cache = merged;

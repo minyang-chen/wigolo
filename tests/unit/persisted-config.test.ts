@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -136,6 +136,93 @@ describe('writePersistedConfig', () => {
     const raw = JSON.parse(readFileSync(path, 'utf-8'));
     expect(raw.provider?.key).toBeUndefined();
     expect(raw.provider?.name).toBe('anthropic');
+  });
+
+  it('writes config.json with 0o600 permissions (owner-only)', () => {
+    const path = join(dir, 'config.json');
+    writePersistedConfig(path, { settings: { defaultBrowser: 'chromium' } });
+    const mode = statSync(path).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  it('strips denylisted secret settings keys (braveApiKey / githubToken)', () => {
+    const path = join(dir, 'config.json');
+    writePersistedConfig(path, {
+      settings: {
+        defaultBrowser: 'chromium',
+        braveApiKey: 'brave-secret',
+        githubToken: 'ghp_secret',
+      },
+    });
+    const raw = JSON.parse(readFileSync(path, 'utf-8'));
+    expect(raw.settings.braveApiKey).toBeUndefined();
+    expect(raw.settings.githubToken).toBeUndefined();
+    // Non-secret key survives.
+    expect(raw.settings.defaultBrowser).toBe('chromium');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Migration write-back (spec §Migration)
+// ---------------------------------------------------------------------------
+
+describe('readPersistedConfig — migration write-back', () => {
+  it('upgrades a legacy version-less file on disk to the current version', () => {
+    const path = join(dir, 'config.json');
+    // Legacy version-less file (pre-SP0 TUI write).
+    writeFileSync(path, JSON.stringify({ defaultBrowser: 'chromium' }));
+    readPersistedConfig(path);
+    // Drop the in-memory cache so the next read pulls from disk.
+    resetPersistedConfig();
+    const raw = JSON.parse(readFileSync(path, 'utf-8'));
+    expect(raw.version).toBe(PERSISTED_CONFIG_VERSION);
+    expect(raw.settings.defaultBrowser).toBe('chromium');
+  });
+
+  it('does NOT rewrite a file already at the current version (no churn)', () => {
+    const path = join(dir, 'config.json');
+    writeFileSync(path, JSON.stringify({ version: PERSISTED_CONFIG_VERSION, settings: { a: 1 } }));
+    const before = statSync(path).mtimeMs;
+    readPersistedConfig(path);
+    const after = statSync(path).mtimeMs;
+    expect(after).toBe(before);
+  });
+
+  it('does NOT rewrite a future-version file (downgrade tolerance)', () => {
+    const path = join(dir, 'config.json');
+    writeFileSync(
+      path,
+      JSON.stringify({ version: PERSISTED_CONFIG_VERSION + 5, settings: { a: 1 } }),
+    );
+    readPersistedConfig(path);
+    resetPersistedConfig();
+    const raw = JSON.parse(readFileSync(path, 'utf-8'));
+    // Version preserved verbatim — we don't downgrade.
+    expect(raw.version).toBe(PERSISTED_CONFIG_VERSION + 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Provider block reconstruction (item 4 — no secret carry-through)
+// ---------------------------------------------------------------------------
+
+describe('readPersistedConfig — provider reconstruction', () => {
+  it('reconstructs provider from name + keyLocation only, dropping any secret field', () => {
+    const path = join(dir, 'config.json');
+    // Hand-crafted file with a smuggled secret in the provider block.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: PERSISTED_CONFIG_VERSION,
+        settings: {},
+        provider: { name: 'anthropic', keyLocation: 'env', key: 'sk-leak' },
+      }),
+    );
+    const cfg = readPersistedConfig(path);
+    expect(cfg.provider?.name).toBe('anthropic');
+    expect(cfg.provider?.keyLocation).toBe('env');
+    // No secret/unknown field carried into the in-memory config.
+    expect((cfg.provider as Record<string, unknown> | undefined)?.key).toBeUndefined();
   });
 });
 
