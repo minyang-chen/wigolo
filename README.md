@@ -4,6 +4,13 @@ Local-first web intelligence MCP server. 8 tools: `search`, `fetch`, `crawl`, `c
 
 > **Status:** `v0.1.15+` — the **core direct-engine retrieval path is now the default** (`WIGOLO_SEARCH=core`). Legacy SearXNG and the new `hybrid` (core + smart fallback) modes are opt-in. Full v1.0 will land after the post-overhaul cross-tool bench rerun.
 
+## Prerequisites
+
+- **Node.js 20+**
+- **Python 3** — required only for the SearXNG-based search modes (`WIGOLO_SEARCH=searxng` / `hybrid`); the default `core` path works without Python.
+- **Git** — used by the install flow for some bootstrapping steps.
+- **~500 MB free disk** — embedding model (~90 MB), reranker model (~22 MB), browser binaries (~350 MB), plus cache growth over time.
+
 ## Install
 
 ```bash
@@ -11,6 +18,14 @@ npx @staticn0va/wigolo init
 ```
 
 The init flow runs a system check, downloads the embedding + reranker models, bootstraps the legacy search engine (used by `WIGOLO_SEARCH=searxng` / `hybrid`), detects installed AI coding agents (Claude Code, Cursor, Gemini CLI, Codex, Windsurf, Zed, OpenCode), and writes MCP config + skill docs for each one.
+
+### Per-OS notes
+
+**macOS** — all features work out of the box. The browser engine is installed automatically during `init` / `warmup`.
+
+**Linux** — same as macOS. On Alpine/musl, `sqlite-vec` binary will be absent (vector search disabled, FTS5 still works). Some CI environments may need headless browser deps.
+
+**Windows** — supported as of v0.1.22. The default `core` search backend works without SearXNG. If you enable `WIGOLO_SEARCH=searxng` or `hybrid`, the native SearXNG bootstrap may not succeed on Windows; use the Docker fallback (Docker Desktop must be running) or stay on `core`. Run `wigolo warmup --all` from PowerShell or Command Prompt after install.
 
 Or wire it yourself in any MCP client:
 
@@ -38,8 +53,11 @@ wigolo --help
 |---|---|
 | `wigolo` (no args) | Boot MCP server on stdio (used by MCP clients) |
 | `wigolo init` | Interactive onboarding (browser pick, agent detect, MCP config) |
+| `wigolo config [--plain / -y]` | Interactive configuration TUI — review/toggle components, set LLM provider + key, edit settings. Use `--plain` / `--non-interactive` / `-y` for non-interactive output. |
+| `wigolo dashboard [--storage] [--cache-stats] [--cleanup <component>] [--export [path]] [--import <path>] [--uninstall [--yes]]` | Management dashboard — storage map, cache stats, cleanup, config export/import, full uninstall. |
+| `wigolo verify [--plain]` | End-to-end capability check: search → fetch → extract → synthesis + per-agent MCP-wiring. Exit 0 on pass/skip, 1 on failure. |
 | `wigolo warmup [--all] [--embeddings] [--reranker]` | Pre-fetch models + bootstrap SearXNG |
-| `wigolo doctor` | Diagnostic: Python, browsers, models, SearXNG, RSS feeds, telemetry |
+| `wigolo doctor` | Diagnostic: Python, browsers, models, search engine, RSS feeds, LLM provider + key location, telemetry |
 | `wigolo health` | Quick OK/degraded exit code |
 | `wigolo serve [--port N]` | Run as HTTP daemon |
 | `wigolo shell` | Interactive REPL against the 8 tools |
@@ -47,7 +65,7 @@ wigolo --help
 | `wigolo setup mcp` | Wire MCP config into installed agents |
 | `wigolo status` | Show running daemon status |
 | `wigolo plugin <subcommand>` | Manage plugins |
-| `wigolo uninstall` | Remove wigolo install |
+| `wigolo uninstall` | Remove agent MCP integrations only (does not delete `~/.wigolo` data; use `wigolo dashboard --uninstall` for a full cleanup) |
 | `wigolo --help` / `wigolo --version` | Help + version |
 
 ## The 8 MCP tools
@@ -96,31 +114,68 @@ The `core` engine ships:
 ## Local stack
 
 - **Search aggregator (legacy path):** SearXNG — bootstrapped to `~/.wigolo/searxng/` on first run (native venv preferred, Docker fallback)
-- **Browser:** Playwright Chromium / Firefox / WebKit; Lightpanda available as a fast JS-renderer alternative
+- **Browser engine:** Playwright Chromium (required); Firefox and WebKit also available via Playwright. Chromium is the only v1 browser engine — no third-party JS renderers.
 - **Content extraction:** Defuddle with content-type routing for news / recipe / product / paper / event JSON-LD, plus a Mozilla Readability fallback
 - **Embeddings:** `fastembed` running ONNX `BGE-small-en-v1.5` (384-dim) — cached under `~/.wigolo/fastembed/`
 - **Reranker:** `@huggingface/transformers` cross-encoder `Xenova/ms-marco-MiniLM-L-6-v2` — cached under `~/.wigolo/transformers/`
 - **Cache:** SQLite WAL + FTS5; optional vector hybrid via `sqlite-vec` when the extension is loadable on your platform
 - **Process model:** stdio MCP server by default; HTTP daemon (`wigolo serve`) and REPL (`wigolo shell`) also available
 
-## LLM extraction fallback (optional)
+## Provider setup (optional)
 
-`extract` with `mode: "schema"` falls back to an LLM when heuristics miss. Set one of:
+Wigolo uses an LLM provider for two optional capabilities: `extract` schema-mode fallback (when heuristics miss) and `research` synthesis. Neither is required — both degrade gracefully when no provider is configured.
+
+### Recommended: interactive setup
+
+```bash
+wigolo config
+```
+
+The configuration TUI lets you pick a provider (Anthropic, OpenAI, Gemini, or a local/Ollama endpoint) and enter your API key. Keys are stored in the OS keychain when available, falling back to an encrypted file — never in plain text on disk.
+
+### Manual setup via env vars
 
 ```bash
 export ANTHROPIC_API_KEY=...
 export OPENAI_API_KEY=...
 export GOOGLE_API_KEY=...
-export GROQ_API_KEY=...
 # optional: pin which provider
 export WIGOLO_LLM_PROVIDER=anthropic|openai|gemini|groq
 ```
 
-If no key is set the fallback is skipped — `extract` still works through the heuristic path. Calls are cached (default 7 days) and rate-limited per request.
+For a local Ollama or OpenAI-compatible endpoint:
 
-## Local LLM fallback (research synthesis)
+```bash
+export WIGOLO_LLM_PROVIDER=openai-compatible
+export WIGOLO_LLM_ENDPOINT=http://localhost:11434/v1
+```
 
-Set `WIGOLO_LLM_PROVIDER=openai-compatible` plus `WIGOLO_LLM_ENDPOINT=http://localhost:11434/v1` to let `research` use a local model (e.g. Ollama) when the host MCP client doesn't support sampling.
+`wigolo doctor` shows the active provider, masked key, and storage location. LLM calls are cached (default 7 days) and rate-limited per request.
+
+## Uninstall
+
+**Remove agent integrations only** (MCP config entries, skill files, instruction blocks):
+
+```bash
+wigolo uninstall
+```
+
+**Full uninstall** (removes `~/.wigolo` data — cache, models, search-engine state, encrypted key store — AND agent integrations):
+
+```bash
+wigolo dashboard --uninstall --yes
+```
+
+Omit `--yes` for an interactive confirmation prompt. The `wigolo dashboard` TUI has the same "Full uninstall" action. Before a full uninstall you can export your non-secret config with `wigolo dashboard --export`.
+
+## Optional dependencies
+
+| Package | What it does | Fallback |
+|---|---|---|
+| `@napi-rs/keyring` | OS keychain access for storing provider API keys | Falls back to an AES-256-GCM encrypted file under `~/.wigolo/` |
+| `wreq-js` | TLS-impersonation HTTP tier (opt-in via `WIGOLO_TLS_TIER=auto\|on`) | Tier is disabled; platforms without a prebuilt binary degrade gracefully |
+
+Both are `optionalDependencies` — install never fails if they're absent.
 
 ## Config flags worth knowing
 
@@ -139,8 +194,13 @@ Set `WIGOLO_LLM_PROVIDER=openai-compatible` plus `WIGOLO_LLM_ENDPOINT=http://loc
 
 ## What's known to work
 
-- 8 MCP tools, full test suite passing (4000+ unit + integration tests on macOS arm64)
-- `init` flow on macOS for Claude Code, Cursor, Gemini CLI, Codex, Windsurf, Zed, OpenCode
+- 8 MCP tools, full test suite passing (CI on macOS, Linux, and Windows)
+- `init` flow for Claude Code, Cursor, Gemini CLI, Codex, Windsurf, Zed, OpenCode
+- `wigolo config` — interactive TUI for reconfiguration, component toggles, provider/key setup
+- `wigolo dashboard` — storage map, cache stats, cleanup, config export/import, full uninstall
+- `wigolo verify` — end-to-end capability smoke check with per-capability pass/fail/skip
+- `~/.wigolo/config.json` — persisted settings layer (env vars still override; secrets never stored there)
+- Provider key management: OS keychain → encrypted file → env var fallback chain
 - `WIGOLO_SEARCH=core` runs end-to-end as the default backend: direct engines, RRF, ML rerank, brand-collision ranker, `evidence_score`, `freshness_signal`, `query_understanding`, `engine_telemetry`
 - `WIGOLO_SEARCH=hybrid` smart-fallback (signals: brand-collision, over-filter, all-engines-failed, low-overlap)
 - `search_depth` tiers (`ultra-fast` / `fast` / `balanced` / `deep`)
@@ -153,10 +213,10 @@ Set `WIGOLO_LLM_PROVIDER=openai-compatible` plus `WIGOLO_LLM_ENDPOINT=http://loc
 
 ## What's still gated / not done
 
-- **Post-overhaul bench rerun** — the search-default overhaul (Phases 0-4) is done in `main`. The 5-way blind bench (wigolo-core vs wigolo-searxng vs Tavily vs Exa vs Firecrawl) needs to be re-run on the post-overhaul SHA. Aggregate target is ≥ 280 / 350 (pre-overhaul: 223). See `docs/superpowers/plans/OVERHAUL_PROGRESS.md`.
+- **Post-overhaul bench rerun** — the search-default overhaul (Phases 0-4) is done in `main`. The 5-way blind bench (wigolo-core vs wigolo-searxng vs Tavily vs Exa vs Firecrawl) needs to be re-run on the post-overhaul SHA. Aggregate target is ≥ 280 / 350 (pre-overhaul: 223).
 - **v1.0 release** — pinned to the post-overhaul bench-gated quality pass.
-- **TUI install polish** — Phase 5 will pick up the three non-blocker items from the install audit.
-- **Bench numbers** — Phase 6/7/8/11/12/13/15 perf + extraction benches are scaffolded but their numbers haven't been captured to `benchmarks/*/output/`.
+- **Bench numbers** — perf + extraction benches are scaffolded but their numbers haven't been captured to `benchmarks/*/output/`.
+- **Windows SearXNG native bootstrap** — on Windows, `WIGOLO_SEARCH=searxng` / `hybrid` may require the Docker fallback. The default `core` path is unaffected.
 
 ## Architecture in one glance
 
@@ -165,10 +225,12 @@ src/
   index.ts          CLI router
   server.ts         MCP server (8 tools + 1 resource)
   config.ts         52+ env vars
-  cli/              warmup, doctor, health, auth, plugin, shell, init, status, backfill, setup-mcp
+  cli/              warmup, doctor, health, auth, plugin, shell, init, config, dashboard, verify, status, backfill, setup-mcp
   tools/            thin MCP handlers (one per tool, delegate to domain)
-  fetch/            SmartRouter (HTTP-first → Playwright), browser pool, auth, Lightpanda
+  fetch/            SmartRouter (HTTP-first → Playwright → TLS-impersonation tier), browser pool, auth
   extraction/       Defuddle + content-type routing + named schemas + LLM fallback
+  persisted-config.ts  ~/.wigolo/config.json layer (schema-versioned, migration-safe, secrets excluded)
+  security/         provider key store (OS keychain → encrypted file → env fallback)
   search/           orchestration shared between backends — dedup, rerank, RRF, multi-query, answer synth
   search/core/      default backend — intent router + verticals + orchestrator + RSS + recency + context-rank + brand-collision ranker + freshness signal + evidence score
   search/legacy/    legacy SearXNG aggregator path (opt-in via WIGOLO_SEARCH=searxng)
