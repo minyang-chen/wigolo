@@ -4,6 +4,9 @@ import { Header } from './Header.js';
 import { Sidebar, type SidebarRoute } from './Sidebar.js';
 import { MainPane } from './MainPane.js';
 import { Footer, FooterProvider } from './Footer.js';
+import { CommandPalette } from './CommandPalette.js';
+import { HelpOverlay } from './HelpOverlay.js';
+import type { PaletteEntry } from './palette-index.js';
 
 export const DEFAULT_ROUTES: readonly SidebarRoute[] = [
   { id: 'browser',   label: 'Browser',       group: 'settings' },
@@ -30,6 +33,12 @@ interface AppProps {
   paneTitle: string;
   onSelectRoute: (id: string) => void;
   children: ReactNode;
+  paletteOpen?: boolean;
+  paletteEntries?: PaletteEntry[];
+  onPalettePick?: (entry: PaletteEntry) => void;
+  onPaletteClose?: () => void;
+  helpOpen?: boolean;
+  onHelpClose?: () => void;
 }
 
 export function App(props: AppProps): JSX.Element {
@@ -51,6 +60,20 @@ export function App(props: AppProps): JSX.Element {
           </MainPane>
         </Box>
         <Footer />
+        {props.paletteOpen && props.paletteEntries && props.onPalettePick && props.onPaletteClose && (
+          <Box position="absolute" marginLeft={4} marginTop={2}>
+            <CommandPalette
+              entries={props.paletteEntries}
+              onPick={props.onPalettePick}
+              onClose={props.onPaletteClose}
+            />
+          </Box>
+        )}
+        {props.helpOpen && props.onHelpClose && (
+          <Box position="absolute" marginLeft={4} marginTop={2}>
+            <HelpOverlay onClose={props.onHelpClose} />
+          </Box>
+        )}
       </Box>
     </FooterProvider>
   );

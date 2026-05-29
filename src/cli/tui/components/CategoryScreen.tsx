@@ -12,7 +12,7 @@
  *                    is called which autosaves the field to disk.
  *   - esc          → cancel current edit, OR call `onBack()` when idle
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { CategoryDef, FieldDef, Ctx } from '../schema/types.js';
 import type { SettingsStore } from '../state/settings-store.js';
@@ -26,10 +26,11 @@ export interface CategoryScreenProps {
   category: CategoryDef;
   store: SettingsStore;
   onBack: () => void;
+  onEditBufferChange?: (editing: boolean) => void;
 }
 
 export function CategoryScreen(props: CategoryScreenProps): React.ReactElement {
-  const { category, store, onBack } = props;
+  const { category, store, onBack, onEditBufferChange } = props;
 
   // Force a re-render whenever the store mutates so pending markers + the
   // ActionBar count stay in sync with edits.
@@ -52,6 +53,11 @@ export function CategoryScreen(props: CategoryScreenProps): React.ReactElement {
 
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [editing, setEditing] = useState(false);
+
+  const applyEditing = useCallback((next: boolean) => {
+    setEditing(next);
+    onEditBufferChange?.(next);
+  }, [onEditBufferChange]);
 
   // Clamp focus if the visible-field list shrinks (e.g. a conditional flipped).
   useEffect(() => {
@@ -85,7 +91,7 @@ export function CategoryScreen(props: CategoryScreenProps): React.ReactElement {
       const focused = visibleFields[focusedIndex];
       if (!focused) return;
       if (focused.kind === 'text' || focused.kind === 'number' || focused.kind === 'path') {
-        setEditing(true);
+        applyEditing(true);
       }
       return;
     }
@@ -135,14 +141,14 @@ export function CategoryScreen(props: CategoryScreenProps): React.ReactElement {
               onChange={(next) => {
                 store.set(settingsPath, next);
               }}
-              onEditStart={() => setEditing(true)}
+              onEditStart={() => applyEditing(true)}
               onEditDone={() => {
-                setEditing(false);
+                applyEditing(false);
                 void store.blur(settingsPath).catch((err) => {
                   logger.error('blur failed', { path: settingsPath, err: String(err) });
                 });
               }}
-              onEditCancel={() => setEditing(false)}
+              onEditCancel={() => applyEditing(false)}
             />
           );
         })}

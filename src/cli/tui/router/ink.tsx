@@ -7,7 +7,7 @@
  * backwards-compat with SP6-era unit tests. It is NOT used in production.
  * See the @deprecated JSDoc on InkRouter for removal timeline.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInput } from 'ink';
 import type { CategoryDef, CategoryId } from '../schema/types.js';
 import type { SettingsStore } from '../state/settings-store.js';
@@ -20,6 +20,7 @@ import { DashboardExport } from '../components/DashboardExport.js';
 import { ImportScreen } from '../components/ImportScreen.js';
 import { DashboardUninstall } from '../components/DashboardUninstall.js';
 import { App, DEFAULT_ROUTES } from '../shell/App.js';
+import { buildPaletteIndex, type PaletteEntry } from '../shell/palette-index.js';
 
 type ScreenView =
   | { kind: 'home' }
@@ -174,6 +175,9 @@ export function InkRoot(props: InkRootProps): React.ReactElement {
 
   const [view, setView] = useState<ScreenView>(() => resolveInitialView(initialRoute));
   const [focusedPane, setFocusedPane] = useState<'sidebar' | 'main'>('sidebar');
+  const [inEditBuffer, setInEditBuffer] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Reactive pending count
   const [pending, setPending] = useState(() => store.dirtyKeys().length);
@@ -192,10 +196,44 @@ export function InkRoot(props: InkRootProps): React.ReactElement {
     return unsub;
   }, [toastStore]);
 
-  // Tab key toggles focus between sidebar and main
+  // Build palette index once per catalog change
+  const ACTION_LABELS = ['Verify', 'Doctor', 'Export', 'Import', 'Uninstall'];
+  const paletteEntries = useMemo(
+    () => buildPaletteIndex({ catalog: [...catalog], actionLabels: ACTION_LABELS }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalog],
+  );
+
+  // Global key handler: Ctrl-K opens palette; ? opens help (when not in edit buffer)
   useInput((_input, key) => {
+    if (paletteOpen || helpOpen) return;
+    if (key.ctrl && _input === 'k') {
+      setPaletteOpen(true);
+      return;
+    }
+    if (_input === '?' && !inEditBuffer) {
+      setHelpOpen(true);
+      return;
+    }
     if (key.tab) setFocusedPane((p) => p === 'sidebar' ? 'main' : 'sidebar');
   });
+
+  const handlePalettePick = useCallback((entry: PaletteEntry) => {
+    setPaletteOpen(false);
+    if (entry.kind === 'category') {
+      setView({ kind: 'category', id: entry.id as CategoryId });
+      setFocusedPane('main');
+    } else if (entry.kind === 'field' && entry.path) {
+      setView({ kind: 'category', id: entry.path as CategoryId });
+      setFocusedPane('main');
+    } else if (entry.kind === 'action') {
+      setView({ kind: 'action', id: entry.id as SettingsHomeAction });
+      setFocusedPane('main');
+    }
+  }, []);
+
+  const handlePaletteClose = useCallback(() => setPaletteOpen(false), []);
+  const handleHelpClose = useCallback(() => setHelpOpen(false), []);
 
   const goHome = useCallback(() => {
     setView({ kind: 'home' });
@@ -244,7 +282,14 @@ export function InkRoot(props: InkRootProps): React.ReactElement {
         />
       );
     } else {
-      currentScreen = <CategoryScreen category={category} store={store} onBack={goHome} />;
+      currentScreen = (
+        <CategoryScreen
+          category={category}
+          store={store}
+          onBack={goHome}
+          onEditBufferChange={setInEditBuffer}
+        />
+      );
     }
   } else if (view.kind === 'action') {
     const actionId: SettingsHomeAction = view.id;
@@ -294,6 +339,12 @@ export function InkRoot(props: InkRootProps): React.ReactElement {
       focusedPane={focusedPane}
       paneTitle={paneTitle}
       onSelectRoute={handleSelectRoute}
+      paletteOpen={paletteOpen}
+      paletteEntries={paletteEntries}
+      onPalettePick={handlePalettePick}
+      onPaletteClose={handlePaletteClose}
+      helpOpen={helpOpen}
+      onHelpClose={handleHelpClose}
     >
       {currentScreen}
     </App>
