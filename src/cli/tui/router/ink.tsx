@@ -26,6 +26,9 @@ type ScreenView =
 
 const ACTION_LABELS = ['Verify', 'Doctor', 'Export', 'Import', 'Uninstall'];
 
+// TODO: derive from a future system-health store; SP4 spec deferred this wiring
+const SYSTEM_STATUS = 'ok' as const;
+
 // ---------------------------------------------------------------------------
 // InkRoot — production shell compositor (SP6+)
 //
@@ -264,7 +267,7 @@ export function InkRoot(props: InkRootProps): React.ReactElement {
       activeRoute={activeRoute}
       routeId={routeId}
       dirtyByCategory={dirtyByCategory}
-      status="ok"
+      status={SYSTEM_STATUS}
       pending={pending}
       toast={toast}
       focusedPane={focusedPane}
