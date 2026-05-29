@@ -35,14 +35,14 @@ export function createSettingsStore(
     const next: Promise<void> = prev.then(async () => {
       const { persistKey } = await import('../actions/write-config.js');
       await persistKey(path, value);
-      pending.delete(path);
+      if (pending.get(path) === value) {
+        pending.delete(path);
+      }
       notify();
     });
     queues.set(path, next);
     try {
       await next;
-    } catch (err) {
-      throw err;
     } finally {
       if (queues.get(path) === next) queues.delete(path);
     }

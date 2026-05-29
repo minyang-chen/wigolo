@@ -57,5 +57,5 @@ export type { WriteResult };
  */
 export async function persistKey(path: string, value: unknown): Promise<void> {
   const configPath = defaultConfigPath();
-  writePersistedConfig(configPath, { settings: { [path]: value } });
+  return await Promise.resolve(writePersistedConfig(configPath, { settings: { [path]: value } }));
 }

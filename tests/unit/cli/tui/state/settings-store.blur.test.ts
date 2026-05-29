@@ -10,8 +10,12 @@ vi.mock('../../../../../src/cli/tui/actions/write-config.js', () => ({
 
 import { createSettingsStore } from '../../../../../src/cli/tui/state/settings-store.js';
 
-beforeEach(() => {
+beforeEach(async () => {
   writes.length = 0;
+  const { persistKey } = await import('../../../../../src/cli/tui/actions/write-config.js');
+  (persistKey as ReturnType<typeof vi.fn>).mockImplementation(async (path: string, value: unknown) => {
+    writes.push([path, value]);
+  });
 });
 
 describe('settings-store.blur', () => {
@@ -59,5 +63,37 @@ describe('settings-store.blur', () => {
     store.set('llm.key', 'sk-…');
     await expect(store.commitOne('llm.key')).rejects.toThrow('disk full');
     expect(store.dirtyKeys()).toContain('llm.key');
+  });
+
+  it('serialises three concurrent same-key writes and reports dirty between them', async () => {
+    const { persistKey } = await import('../../../../../src/cli/tui/actions/write-config.js');
+    const resolvers: Array<() => void> = [];
+    (persistKey as ReturnType<typeof vi.fn>).mockImplementation((_k, _v) =>
+      new Promise<void>((r) => { resolvers.push(r); })
+    );
+    const store = createSettingsStore({});
+    store.set('llm.key', 'a');
+    const p1 = store.commitOne('llm.key');
+    store.set('llm.key', 'b');
+    const p2 = store.commitOne('llm.key');
+    store.set('llm.key', 'c');
+    const p3 = store.commitOne('llm.key');
+
+    // Wait for the first persistKey call to be queued (dynamic import inside
+    // the .then chain means we need more than one microtask tick).
+    await vi.waitFor(() => { if (resolvers.length < 1) throw new Error('waiting'); });
+    resolvers[0]();
+    await p1;
+    expect(store.dirtyKeys()).toContain('llm.key');  // 'c' still pending
+
+    await vi.waitFor(() => { if (resolvers.length < 2) throw new Error('waiting'); });
+    resolvers[1]();
+    await p2;
+    expect(store.dirtyKeys()).toContain('llm.key');  // 'c' still pending
+
+    await vi.waitFor(() => { if (resolvers.length < 3) throw new Error('waiting'); });
+    resolvers[2]();
+    await p3;
+    expect(store.dirtyKeys()).not.toContain('llm.key');  // all done
   });
 });
