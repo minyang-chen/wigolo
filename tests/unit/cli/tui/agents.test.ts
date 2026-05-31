@@ -263,11 +263,11 @@ describe('detectAgents()', () => {
   });
 
   it('honors cwd and home overrides', () => {
-    vi.mocked(dirExists).mockImplementation((p) => p === '/custom/cwd/.cursor');
+    vi.mocked(dirExists).mockImplementation((p) => p === join('/custom/cwd', '.cursor'));
     vi.mocked(binaryInPath).mockReturnValue(null);
     const agents = detectAgents({ cwd: '/custom/cwd', home: '/custom/home' });
     const cursorAgent = agents.find((a) => a.id === 'cursor');
-    expect(cursorAgent?.configPath).toBe('/custom/cwd/.cursor/mcp.json');
+    expect(cursorAgent?.configPath).toBe(join('/custom/cwd', '.cursor', 'mcp.json'));
   });
 
   it('preserves AGENTS registration order in the returned array', () => {
