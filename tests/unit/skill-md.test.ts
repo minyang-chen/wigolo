@@ -246,3 +246,71 @@ describe('SKILL.md — v3 structure and content', () => {
     }
   });
 });
+
+// CRLF tolerance — Windows git checkout converts text files to CRLF by
+// default. This block synthetically rewrites the on-disk LF content to CRLF
+// and re-runs the frontmatter checks. Both the delimiter regex and the
+// parser helper must tolerate Windows line endings; if either regresses we
+// catch it here without needing a Windows runner.
+describe('SKILL.md — CRLF tolerance (Windows checkout)', () => {
+  function asCrlf(s: string): string {
+    return s.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+  }
+
+  it('frontmatter delimiter checks match CRLF input', () => {
+    const lf = readFileSync(SKILL_PATH, 'utf-8');
+    const crlf = asCrlf(lf);
+    expect(crlf.includes('\r\n')).toBe(true);
+    // Replicates the production-equivalent delimiter checks in the
+    // `has YAML frontmatter delimiters` test above. The fix must make both
+    // expressions return truthy values on CRLF input.
+    expect(/^---\r?\n/.test(crlf)).toBe(true);
+    expect(crlf.search(/\r?\n---/)).toBeGreaterThan(3);
+  });
+
+  it('parseYamlFrontmatter returns required top-level fields from CRLF input', () => {
+    const lf = readFileSync(SKILL_PATH, 'utf-8');
+    const crlf = asCrlf(lf);
+    const frontmatter = parseYamlFrontmatter(crlf);
+    expect(frontmatter).not.toBeNull();
+    expect(frontmatter!.name).toBe('wigolo');
+    expect(frontmatter!.author).toBe('KnockOutEZ');
+    expect(frontmatter!.license).toBe('PolyForm-Noncommercial-1.0.0');
+    expect(frontmatter!.transport).toBe('stdio');
+    expect(frontmatter!.runtime).toBe('node');
+  });
+
+  it('parseYamlFrontmatter returns all 8 v3 tools from CRLF input', () => {
+    const lf = readFileSync(SKILL_PATH, 'utf-8');
+    const crlf = asCrlf(lf);
+    const frontmatter = parseYamlFrontmatter(crlf);
+    expect(frontmatter).not.toBeNull();
+    const tools = frontmatter!.tools as unknown[];
+    expect(Array.isArray(tools)).toBe(true);
+    expect(tools.length).toBe(8);
+  });
+
+  it('parseYamlFrontmatter tool names from CRLF input cover v3 additions and v1/v2 tools', () => {
+    const lf = readFileSync(SKILL_PATH, 'utf-8');
+    const crlf = asCrlf(lf);
+    const frontmatter = parseYamlFrontmatter(crlf);
+    const tools = frontmatter!.tools as Array<Record<string, unknown>>;
+    const toolNames = tools.map(t => t.name);
+    for (const name of ['fetch', 'search', 'crawl', 'cache', 'extract', 'find_similar', 'research', 'agent']) {
+      expect(toolNames).toContain(name);
+    }
+  });
+
+  it('each tool entry from CRLF input has name and non-empty description', () => {
+    const lf = readFileSync(SKILL_PATH, 'utf-8');
+    const crlf = asCrlf(lf);
+    const frontmatter = parseYamlFrontmatter(crlf);
+    const tools = frontmatter!.tools as Array<Record<string, unknown>>;
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(typeof tool.name).toBe('string');
+      expect(typeof tool.description).toBe('string');
+      expect((tool.description as string).length).toBeGreaterThan(10);
+    }
+  });
+});
