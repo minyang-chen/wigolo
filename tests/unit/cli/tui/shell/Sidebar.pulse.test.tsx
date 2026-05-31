@@ -133,6 +133,68 @@ describe('Sidebar — dirty-dot pulse', () => {
     expect(llmLine).not.toContain('●');
   });
 
+  it('pulse for category A survives a subsequent dirty change for category B', async () => {
+    vi.useFakeTimers();
+
+    const routes: readonly SidebarRoute[] = [
+      { id: 'a', label: 'Category A', group: 'settings' },
+      { id: 'b', label: 'Category B', group: 'settings' },
+      { id: 'verify', label: 'Verify', group: 'actions' },
+    ];
+
+    const { lastFrame, rerender } = render(
+      <Sidebar
+        routes={routes}
+        activeRoute="a"
+        dirtyByCategory={{ a: 1, b: 0 }}
+        onSelect={() => {}}
+        focused={false}
+      />,
+    );
+    await vi.advanceTimersByTimeAsync(20);
+
+    // A transitions N→0: pulse begins
+    rerender(
+      <Sidebar
+        routes={routes}
+        activeRoute="a"
+        dirtyByCategory={{ a: 0, b: 0 }}
+        onSelect={() => {}}
+        focused={false}
+      />,
+    );
+    await vi.advanceTimersByTimeAsync(200);
+
+    // A's pulse is still active (200ms < 500ms)
+    expect(lastFrame() ?? '').toContain('●');
+
+    // B becomes dirty — triggers another dirtyByCategory change (effect re-runs)
+    rerender(
+      <Sidebar
+        routes={routes}
+        activeRoute="a"
+        dirtyByCategory={{ a: 0, b: 1 }}
+        onSelect={() => {}}
+        focused={false}
+      />,
+    );
+    await vi.advanceTimersByTimeAsync(50);
+
+    // A's pulse should still be active — dot visible (either from A pulse or B dirty)
+    expect(lastFrame() ?? '').toContain('●');
+
+    // Advance past A's 500ms pulse window (200 + 50 + 400 = 650ms total)
+    await vi.advanceTimersByTimeAsync(400);
+
+    const lines = (lastFrame() ?? '').split('\n');
+    const aLine = lines.find((l) => l.includes('Category A')) ?? '';
+    // A's pulse has expired — no dot on A's row
+    expect(aLine).not.toContain('●');
+    // B is still dirty — dot visible on B's row
+    const bLine = lines.find((l) => l.includes('Category B')) ?? '';
+    expect(bLine).toContain('●');
+  });
+
   it('timer cleans up on unmount before pulse completes', async () => {
     vi.useFakeTimers();
 

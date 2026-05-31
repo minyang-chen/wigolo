@@ -14,6 +14,9 @@ const FREQUENTLY_USED: string[] = [
 
 const MAX_RESULTS = 8;
 
+// Chrome reserved per row: border (2) + padding (2) + glyph (2) + kind label (8) ≈ 14 cols
+const TINY_LABEL_CHROME_COLS = 14;
+
 interface CommandPaletteProps {
   entries: PaletteEntry[];
   onPick: (entry: PaletteEntry) => void;
@@ -32,7 +35,7 @@ export function CommandPalette({ entries, onPick, onClose }: CommandPaletteProps
   // In tiny mode use full terminal width; otherwise keep the fixed 50-col overlay.
   const overlayWidth = isTiny ? '100%' : 50;
   // Reserve 6 chars for borders, padding, selection glyph, and kind label space.
-  const maxLabelChars = isTiny ? Math.max(10, stdout.columns - 14) : 44;
+  const maxLabelChars = isTiny ? Math.max(10, stdout.columns - TINY_LABEL_CHROME_COLS) : 44;
 
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);

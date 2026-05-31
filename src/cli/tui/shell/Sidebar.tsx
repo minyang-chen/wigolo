@@ -32,51 +32,44 @@ export function Sidebar({ routes, activeRoute, dirtyByCategory, onSelect, focuse
   const [pulsingCategories, setPulsingCategories] = useState<Set<string>>(new Set());
   const pulseTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // Effect 1: respond to dirty changes — detect N→0 transitions and start per-category pulse timers.
   useEffect(() => {
     const prev = prevDirtyRef.current;
-    const newPulsing = new Set<string>();
 
     if (!reducedMotion()) {
       for (const id of Object.keys(prev)) {
         const prevCount = prev[id] ?? 0;
         const curCount = dirtyByCategory[id] ?? 0;
-        if (prevCount > 0 && curCount === 0) {
-          newPulsing.add(id);
+        if (prevCount > 0 && curCount === 0 && !pulseTimers.current.has(id)) {
+          setPulsingCategories((existing) => {
+            const next = new Set(existing);
+            next.add(id);
+            return next;
+          });
+          const handle = setTimeout(() => {
+            setPulsingCategories((s) => {
+              const next = new Set(s);
+              next.delete(id);
+              return next;
+            });
+            pulseTimers.current.delete(id);
+          }, PULSE_TTL);
+          pulseTimers.current.set(id, handle);
         }
       }
     }
 
-    if (newPulsing.size > 0) {
-      setPulsingCategories((existing) => {
-        const next = new Set(existing);
-        for (const id of newPulsing) next.add(id);
-        return next;
-      });
-
-      for (const id of newPulsing) {
-        const existing = pulseTimers.current.get(id);
-        if (existing !== undefined) clearTimeout(existing);
-        const handle = setTimeout(() => {
-          setPulsingCategories((s) => {
-            const next = new Set(s);
-            next.delete(id);
-            return next;
-          });
-          pulseTimers.current.delete(id);
-        }, PULSE_TTL);
-        pulseTimers.current.set(id, handle);
-      }
-    }
-
     prevDirtyRef.current = { ...dirtyByCategory };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirtyByCategory]);
 
+  // Effect 2: cleanup on unmount only — clear all pending pulse timers.
+  useEffect(() => {
     return () => {
-      // Cleanup on unmount — clear all pending pulse timers.
       for (const handle of pulseTimers.current.values()) clearTimeout(handle);
       pulseTimers.current.clear();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirtyByCategory]);
+  }, []);
 
   useInput((_input, key) => {
     if (!focused) return;

@@ -73,8 +73,8 @@ describe('Phase 3 integration', () => {
     // After routing to verify, the toast action label should be gone
     const afterFrame = lastFrame() ?? '';
     expect(afterFrame).not.toContain('Apply & verify');
-    // VerifyScreen should now be rendered
-    expect(afterFrame).toBeTruthy();
+    // VerifyScreen should now be rendered — check for the Verification component's title
+    expect(afterFrame).toContain('Verif');
   });
 
   it('sidebar dirty-dot pulses and disappears after store clears dirty keys', async () => {
