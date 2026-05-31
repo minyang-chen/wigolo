@@ -420,12 +420,6 @@ export function WizardSteps(props: WizardStepsProps): React.ReactElement {
     onDone,
   ]);
 
-  // Steps 3 + 4 render a CategoryScreen. Esc from CategoryScreen calls
-  // `onBack` which we wire to `onSkip` so Esc skips remaining steps.
-  // Advance / finish is triggered by Enter — a dedicated useInput here
-  // catches Enter when on steps 3/4. CategoryScreen also handles Enter
-  // for field navigation; both run, which is acceptable since the user
-  // leaving a step via Enter is intentional.
   const advanceFromCategory = useCallback(() => {
     if (step === 3) {
       setStep(4);

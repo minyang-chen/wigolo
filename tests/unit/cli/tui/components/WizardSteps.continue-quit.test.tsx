@@ -62,7 +62,7 @@ async function advanceToStep3(stdin: { write: (s: string) => void }) {
 }
 
 // Helper: advance to step 4 (Agents) via Continue row
-async function advanceToStep4ViaContine(stdin: { write: (s: string) => void }, fieldCount: number) {
+async function advanceToStep4ViaContinue(stdin: { write: (s: string) => void }, fieldCount: number) {
   // Navigate past all fields to Continue row (fieldCount fields + 1 Continue)
   for (let i = 0; i < fieldCount; i++) {
     stdin.write(ARROW_DOWN);
@@ -144,7 +144,7 @@ describe('WizardSteps — Bug 1: Enter on field does NOT advance wizard', () => 
     await wait(30);
 
     // LLM category has 2 fields (Provider, API key). Navigate past both + Continue row.
-    await advanceToStep4ViaContine(stdin, 2);
+    await advanceToStep4ViaContinue(stdin, 2);
 
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Step 4 / 4');
@@ -197,7 +197,7 @@ describe('WizardSteps — Bug 1: Enter on field does NOT advance wizard', () => 
     await wait(30);
 
     // Navigate to Continue (2 fields in LLM).
-    await advanceToStep4ViaContine(stdin, 2);
+    await advanceToStep4ViaContinue(stdin, 2);
 
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Step 4 / 4');
@@ -277,7 +277,7 @@ describe('WizardSteps — Bug 2: Visible Quit affordance in wizard', () => {
     await wait(30);
     await advanceToStep3(stdin);
     await wait(30);
-    await advanceToStep4ViaContine(stdin, 2);
+    await advanceToStep4ViaContinue(stdin, 2);
 
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Step 4 / 4');
