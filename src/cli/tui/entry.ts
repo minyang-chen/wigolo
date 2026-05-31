@@ -168,6 +168,12 @@ function MountRoot(props: MountRootProps): React.ReactElement {
   }> | null>(null);
   const [phase, setPhase] = React.useState<'wizard' | 'home'>(props.initialView);
 
+  // Sync phase when the parent passes a new initialView (e.g. init → force-wizard
+  // delegate resolves after the component has already mounted with 'home').
+  React.useEffect(() => {
+    setPhase(props.initialView);
+  }, [props.initialView]);
+
   React.useEffect(() => {
     let cancelled = false;
     // Lazy-load both components so we don't pay their cost in headless mode.
