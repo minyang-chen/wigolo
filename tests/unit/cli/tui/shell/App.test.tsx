@@ -108,11 +108,13 @@ describe('App', () => {
     expect(lastFrame()).toContain('3 pending');
   });
 
-  it('DEFAULT_ROUTES has 6 settings and 5 actions', () => {
+  it('DEFAULT_ROUTES has 6 settings, 5 actions, 1 exit', () => {
     const settings = DEFAULT_ROUTES.filter(r => r.group === 'settings');
     const actions = DEFAULT_ROUTES.filter(r => r.group === 'actions');
+    const exits = DEFAULT_ROUTES.filter(r => r.group === 'exit');
     expect(settings).toHaveLength(6);
     expect(actions).toHaveLength(5);
+    expect(exits).toHaveLength(1);
   });
 
   it('renders children in main pane', async () => {
