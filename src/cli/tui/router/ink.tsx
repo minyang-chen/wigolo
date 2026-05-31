@@ -7,7 +7,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInput } from 'ink';
 import type { CategoryDef, CategoryId } from '../schema/types.js';
 import type { SettingsStore } from '../state/settings-store.js';
-import type { ToastStore } from '../state/toast-store.js';
+import type { ToastStore, ToastAction } from '../state/toast-store.js';
 import type { ActivityStore } from '../state/activity-store.js';
 import { activityStore as defaultActivityStore } from '../state/activity-store-instance.js';
 import { SettingsHome, type SettingsHomeAction } from '../components/SettingsHome.js';
@@ -48,11 +48,19 @@ function saveStateToStatus(state: SaveState): 'ok' | 'warn' | 'err' {
   return 'warn';
 }
 
-function saveStateLabel(state: SaveState, dirtyCount: number, toastMessage: string | null): string {
+function saveStateLabel(
+  state: SaveState,
+  dirtyCount: number,
+  toastMessage: string | null,
+  toastAction: ToastAction | undefined,
+): string {
   switch (state) {
     case 'idle-saved': return 'All changes saved ✓';
     case 'saving': return 'Saving…';
-    case 'saved-toast': return toastMessage ?? 'Saved';
+    case 'saved-toast': {
+      const base = toastMessage ?? 'Saved';
+      return toastAction ? `${base} · ${toastAction.label}` : base;
+    }
     case 'dirty': return `${dirtyCount} unsaved`;
     case 'error': return 'Save failed — check logs';
   }
@@ -167,12 +175,41 @@ export function InkRoot(props: InkRootProps): React.ReactElement {
   }, [liveActivityStore]);
 
   // Reactive toast
-  const [toast, setToast] = useState<{ message: string; severity: 'ok' | 'warn' | 'err'; group?: string } | null>(
+  const [toast, setToast] = useState<{ message: string; severity: 'ok' | 'warn' | 'err'; group?: string; action?: ToastAction } | null>(
     () => toastStore?.current() ?? null,
   );
   useEffect(() => {
     if (!toastStore) return;
     const unsub = toastStore.subscribe(() => setToast(toastStore.current()));
+    return unsub;
+  }, [toastStore]);
+
+  // Apply & Verify affordance: when a new save-group toast arrives (without an
+  // action already set), retrofit it with the verify action so InkRoot's global
+  // keypress handler can fire it on Enter.
+  const prevSaveToastRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!toastStore) return;
+    const unsub = toastStore.subscribe(() => {
+      const t = toastStore.current();
+      if (t?.group === 'save' && !t.action) {
+        const msg = t.message;
+        if (msg !== prevSaveToastRef.current) {
+          prevSaveToastRef.current = msg;
+          toastStore.setCurrentAction({
+            key: '\r',
+            label: '⏎ Apply & verify',
+            handler: () => {
+              setView({ kind: 'action', id: 'verify' });
+              setFocusedPane('main');
+            },
+          });
+        }
+      }
+      if (!t || t.group !== 'save') {
+        prevSaveToastRef.current = null;
+      }
+    });
     return unsub;
   }, [toastStore]);
 
@@ -197,7 +234,7 @@ export function InkRoot(props: InkRootProps): React.ReactElement {
   // Derived save-state (single computed value, no new globals)
   const saveState = computeSaveState(dirtyCount, isSaving, toast, hasUnresolvedError);
   const headerStatus = saveStateToStatus(saveState);
-  const headerLabel = saveStateLabel(saveState, dirtyCount, toast?.message ?? null);
+  const headerLabel = saveStateLabel(saveState, dirtyCount, toast?.message ?? null, toast?.action);
 
   // Build palette index once per catalog change
   const paletteEntries = useMemo(
@@ -206,8 +243,21 @@ export function InkRoot(props: InkRootProps): React.ReactElement {
   );
 
   // Global key handler: Ctrl-K opens palette; ? opens help (when not in edit buffer)
+  // Also honors toast action keys while a toast with an action is visible.
   useInput((_input, key) => {
     if (paletteOpen || helpOpen) return;
+
+    // Toast action: fire handler and dismiss when the matching key is pressed.
+    if (toast?.action && !inEditBuffer) {
+      const action = toast.action;
+      const matchesKey = action.key === '\r' ? key.return : _input === action.key;
+      if (matchesKey) {
+        action.handler();
+        toastStore?.dismiss();
+        return;
+      }
+    }
+
     if (key.ctrl && _input === 'k') {
       setPaletteOpen(true);
       return;

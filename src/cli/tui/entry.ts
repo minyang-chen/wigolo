@@ -1,10 +1,11 @@
 /**
  * Entry router for the schema-driven TUI shell.
  *
- * `resolveEntry()` is a pure decision function: given a caller's intent
- * (`wizard` | `home` | `auto`) and the runtime environment (TTY presence,
- * CI flag, `--plain` / `--non-interactive` overrides, on-disk config), it
- * picks one of two mountable modes plus a `firstRun` and `headless` flag.
+ * `resolveEntry()` reads the persisted config (via `readPersistedConfig`) when
+ * `mode === 'auto'` to decide whether to launch the wizard or the settings
+ * shell. This is NOT a pure function — tests that need isolation must use a
+ * tmpdir, set `WIGOLO_CONFIG_PATH`, and call `resetPersistedConfig()` in
+ * `afterEach` to bust the per-path cache.
  *
  * `runEntry()` is the side-effecting twin: calls `resolveEntry()` then
  * either mounts the new Ink shell (`InkRoot`) with the proper
@@ -16,6 +17,8 @@
  */
 
 import { stat } from 'node:fs/promises';
+import { readPersistedConfig } from '../../persisted-config.js';
+import { hasRequiredFields } from './state/required-fields.js';
 import React from 'react';
 import { render, useApp } from 'ink';
 import type { CategoryDef } from './schema/types.js';
@@ -90,10 +93,15 @@ export async function resolveEntry(opts: ResolveEntryOpts): Promise<EntryResolut
   if (opts.mode === 'home') {
     return { mode: 'home', firstRun: !exists, headless };
   }
-  // auto
-  return exists
-    ? { mode: 'home', firstRun: false, headless }
-    : { mode: 'wizard', firstRun: true, headless };
+  // auto — route to wizard when file is missing OR required fields are absent
+  if (!exists) {
+    return { mode: 'wizard', firstRun: true, headless };
+  }
+  const persisted = readPersistedConfig(opts.configPath);
+  if (!hasRequiredFields(persisted)) {
+    return { mode: 'wizard', firstRun: false, headless };
+  }
+  return { mode: 'home', firstRun: false, headless };
 }
 
 // ---------------------------------------------------------------------------

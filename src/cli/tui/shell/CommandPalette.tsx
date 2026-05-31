@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import { semantic } from '../theme/palette.js';
+import { useShellWidth } from './width.js';
 import { type PaletteEntry, fuzzyScore } from './palette-index.js';
 
 const FREQUENTLY_USED: string[] = [
@@ -13,13 +14,29 @@ const FREQUENTLY_USED: string[] = [
 
 const MAX_RESULTS = 8;
 
+// Chrome reserved per row: border (2) + padding (2) + glyph (2) + kind label (8) ≈ 14 cols
+const TINY_LABEL_CHROME_COLS = 14;
+
 interface CommandPaletteProps {
   entries: PaletteEntry[];
   onPick: (entry: PaletteEntry) => void;
   onClose: () => void;
 }
 
+function truncateLabel(label: string, maxLen: number): string {
+  if (label.length <= maxLen) return label;
+  return label.slice(0, maxLen - 1) + '…';
+}
+
 export function CommandPalette({ entries, onPick, onClose }: CommandPaletteProps): React.ReactElement {
+  const shellWidth = useShellWidth();
+  const { stdout } = useStdout();
+  const isTiny = shellWidth === 'tiny';
+  // In tiny mode use full terminal width; otherwise keep the fixed 50-col overlay.
+  const overlayWidth = isTiny ? '100%' : 50;
+  // Reserve 6 chars for borders, padding, selection glyph, and kind label space.
+  const maxLabelChars = isTiny ? Math.max(10, stdout.columns - TINY_LABEL_CHROME_COLS) : 44;
+
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
 
@@ -77,7 +94,7 @@ export function CommandPalette({ entries, onPick, onClose }: CommandPaletteProps
       borderColor={semantic.accent}
       flexDirection="column"
       paddingX={1}
-      width={50}
+      width={overlayWidth}
     >
       <Text color={semantic.accent} bold>Jump to…</Text>
       <Box>
@@ -91,10 +108,13 @@ export function CommandPalette({ entries, onPick, onClose }: CommandPaletteProps
         {filtered.map((entry, i) => {
           const isSel = i === clampedCursor;
           const kindColor = entry.kind === 'action' ? semantic.accentAlt : entry.kind === 'field' ? semantic.textDim : semantic.ok;
+          const displayLabel = isTiny
+            ? truncateLabel(entry.label, maxLabelChars)
+            : entry.label;
           return (
             <Box key={entry.id} justifyContent="space-between">
               <Text color={isSel ? semantic.text : semantic.textDim} bold={isSel}>
-                {isSel ? '▸ ' : '  '}{entry.label}
+                {isSel ? '▸ ' : '  '}{displayLabel}
               </Text>
               <Text color={kindColor}>{entry.kind}</Text>
             </Box>

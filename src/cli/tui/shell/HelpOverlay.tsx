@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import { semantic } from '../theme/palette.js';
+import { useShellWidth } from './width.js';
 
 const KEYBINDS: { key: string; desc: string }[] = [
   { key: '↑↓',  desc: 'Navigate list / fields' },
@@ -17,6 +18,10 @@ interface HelpOverlayProps {
 }
 
 export function HelpOverlay({ onClose }: HelpOverlayProps): React.ReactElement {
+  const shellWidth = useShellWidth();
+  const isTiny = shellWidth === 'tiny';
+  const overlayWidth = isTiny ? '100%' : 46;
+
   useInput((input, key) => {
     if (key.escape || input === '?') {
       onClose();
@@ -30,7 +35,7 @@ export function HelpOverlay({ onClose }: HelpOverlayProps): React.ReactElement {
       flexDirection="column"
       paddingX={2}
       paddingY={1}
-      width={46}
+      width={overlayWidth}
     >
       <Text color={semantic.accentAlt} bold>Keyboard Shortcuts</Text>
       <Box marginTop={1} flexDirection="column">
