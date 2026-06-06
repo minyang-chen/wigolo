@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { summarizeSetup, probeSetupStatus, type ComponentStatus } from '../../src/cli/tui/actions/setup-status.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { summarizeSetup, probeSetupStatus, defaultProbeDeps, type ComponentStatus } from '../../src/cli/tui/actions/setup-status.js';
 
 const base: ComponentStatus[] = [
   { id: 'browser', label: 'browser', required: true, status: 'ok' },
@@ -75,5 +78,64 @@ describe('probeSetupStatus', () => {
     const search = comps.find(c => c.id === 'search')!;
     expect(search.status).toBe('degraded');
     expect(search.required).toBe(false);
+  });
+});
+
+describe('defaultProbeDeps', () => {
+  let dir: string;
+  let prevConfig: string | undefined;
+  let prevDataDir: string | undefined;
+  let prevSearch: string | undefined;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'wigolo-probe-'));
+    prevConfig = process.env.WIGOLO_CONFIG_PATH;
+    prevDataDir = process.env.WIGOLO_DATA_DIR;
+    prevSearch = process.env.WIGOLO_SEARCH;
+    process.env.WIGOLO_CONFIG_PATH = join(dir, 'config.json');
+    process.env.WIGOLO_DATA_DIR = dir;
+    delete process.env.WIGOLO_SEARCH;
+    // Both config layers cache per-process — reset so the probe reads fresh
+    // from the temp dir/disk rather than a prior test's state.
+    const { resetPersistedConfig } = await import('../../src/persisted-config.js');
+    const { resetConfig } = await import('../../src/config.js');
+    resetPersistedConfig();
+    resetConfig();
+  });
+
+  afterEach(async () => {
+    if (prevConfig === undefined) delete process.env.WIGOLO_CONFIG_PATH;
+    else process.env.WIGOLO_CONFIG_PATH = prevConfig;
+    if (prevDataDir === undefined) delete process.env.WIGOLO_DATA_DIR;
+    else process.env.WIGOLO_DATA_DIR = prevDataDir;
+    if (prevSearch === undefined) delete process.env.WIGOLO_SEARCH;
+    else process.env.WIGOLO_SEARCH = prevSearch;
+    rmSync(dir, { recursive: true, force: true });
+    // Drop the temp-dir-bound caches so later test files start clean.
+    const { resetPersistedConfig } = await import('../../src/persisted-config.js');
+    const { resetConfig } = await import('../../src/config.js');
+    resetPersistedConfig();
+    resetConfig();
+  });
+
+  // Regression guard for the ESM-require bug: a bare `require` (no createRequire
+  // shim) throws ReferenceError at runtime under pure ESM, so this would crash.
+  // Point config/data dir at an empty temp dir so the on-disk checks are safe.
+  it('returns 7 callable members that invoke without throwing', () => {
+    const deps = defaultProbeDeps();
+    const members = [
+      'browserInstalled',
+      'searchBackend',
+      'searxngReady',
+      'embeddingsInstalled',
+      'rerankerInstalled',
+      'llmKeyPresent',
+      'configuredAgents',
+    ] as const;
+
+    for (const m of members) {
+      expect(typeof deps[m]).toBe('function');
+      expect(() => deps[m]()).not.toThrow();
+    }
   });
 });

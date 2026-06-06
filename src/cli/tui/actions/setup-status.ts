@@ -1,5 +1,11 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
+
+// This project is pure ESM (`"type":"module"`); `require` is not defined at
+// runtime. Use createRequire so the synchronous probe body can lazily load
+// modules without making defaultProbeDeps async. Mirrors src/security/keychain.ts.
+const require = createRequire(import.meta.url);
 
 export type ComponentState = 'ok' | 'failed' | 'degraded' | 'absent';
 
