@@ -54,6 +54,10 @@ describe('parseInitFlags provider/search', () => {
     expect(parseInitFlags(['--search=searxng']).search).toBe('searxng');
     expect(parseInitFlags(['--search=hybrid']).search).toBe('hybrid');
   });
+
+  it('space form rejects a following flag as the value', () => {
+    expect(() => parseInitFlags(['--provider', '--search=core'])).toThrow(FlagParseError);
+  });
 });
 
 describe('parseSetupMcpFlags rejects init-only flags', () => {
