@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentTarget } from '../../src/cli/tui/state/agent-targets.js';
 
 describe('fresh-machine setup round-trip', () => {
   let dir: string;
@@ -70,7 +71,6 @@ describe('fresh-machine setup round-trip', () => {
     const { defaultSecretStore } = await import('../../src/cli/tui/state/secret-store.js');
     const { CATALOG } = await import('../../src/cli/tui/schema/catalog.js');
     const { readPersistedConfig, defaultConfigPath, resetPersistedConfig } = await import('../../src/persisted-config.js');
-    const { AgentTarget } = await import('../../src/cli/tui/state/agent-targets.js').catch(() => ({ AgentTarget: undefined }));
 
     // Pre-create an agent config file that looks like wigolo is installed,
     // so detect() returns true and the propagation fan-out runs.
@@ -87,13 +87,13 @@ describe('fresh-machine setup round-trip', () => {
     // since that's the canonical install target: serverPath = ['mcpServers','wigolo'],
     // envPath = ['mcpServers','wigolo','env'].
     const backupDir = join(dir, 'backups');
-    const agentTargets = [
+    const agentTargets: AgentTarget[] = [
       {
-        id: 'claude-code' as const,
+        id: 'claude-code',
         label: 'Claude Code (test)',
         configPath: agentFile,
-        serverPath: ['mcpServers', 'wigolo'] as ReadonlyArray<string>,
-        envPath: ['mcpServers', 'wigolo', 'env'] as ReadonlyArray<string>,
+        serverPath: ['mcpServers', 'wigolo'],
+        envPath: ['mcpServers', 'wigolo', 'env'],
         detect: async () => true,
         backupDir: () => backupDir,
       },
