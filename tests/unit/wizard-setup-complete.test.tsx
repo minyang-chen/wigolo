@@ -2,8 +2,8 @@
  * Task 6 — Wizard completion ceremony fed by shared probe.
  *
  * Verifies that SetupComplete renders per-component status lines,
- * including capability-disabling labels (e.g. 'find_similar') from
- * the shared probeSetupStatus output.
+ * including the disabled-capability suffix (e.g. '→ find_similar disabled')
+ * that Task 6 adds for non-ok components carrying a `disables` value.
  */
 import React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
@@ -32,7 +32,11 @@ describe('SetupComplete', () => {
     const { lastFrame } = render(<SetupComplete statuses={statuses} onDone={() => {}} />);
     const frame = lastFrame() ?? '';
     expect(frame).toContain('browser');
-    expect(frame).toContain('find_similar');
+    // Assert the full disabled-capability suffix, not just the bare label.
+    // This is the behavior Task 6 adds: a non-ok component with `disables`
+    // must render `→ <capability> disabled`. A bare-label assertion would
+    // still pass if that suffix regressed, so match the rendered text exactly.
+    expect(frame).toContain('→ find_similar disabled');
   });
 
   it('shows checkmark for ok component and cross for failed component', () => {
