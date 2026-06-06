@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeSetup, type ComponentStatus } from '../../src/cli/tui/actions/setup-status.js';
+import { summarizeSetup, probeSetupStatus, type ComponentStatus } from '../../src/cli/tui/actions/setup-status.js';
 
 const base: ComponentStatus[] = [
   { id: 'browser', label: 'browser', required: true, status: 'ok' },
@@ -35,5 +35,45 @@ describe('summarizeSetup', () => {
     const s = summarizeSetup(base.map(c => c.id === 'llm' ? { ...c, status: 'absent' } : c));
     expect(s.exitCode).toBe(0);
     expect(s.lines.join('\n')).toMatch(/LLM key/);
+  });
+});
+
+describe('probeSetupStatus', () => {
+  const deps = {
+    browserInstalled: () => true,
+    searchBackend: () => 'core' as const,
+    searxngReady: () => false,
+    embeddingsInstalled: () => true,
+    rerankerInstalled: () => true,
+    llmKeyPresent: () => false,
+    configuredAgents: () => ['claude-code'],
+  };
+
+  it('core backend → search reported ok even when searxng not ready', async () => {
+    const comps = await probeSetupStatus(deps);
+    const search = comps.find(c => c.id === 'search')!;
+    expect(search.status).toBe('ok');
+    expect(search.label).toContain('core');
+  });
+
+  it('missing browser → required browser failed', async () => {
+    const comps = await probeSetupStatus({ ...deps, browserInstalled: () => false });
+    const b = comps.find(c => c.id === 'browser')!;
+    expect(b.required).toBe(true);
+    expect(b.status).toBe('failed');
+  });
+
+  it('no LLM key → llm absent + optional', async () => {
+    const comps = await probeSetupStatus(deps);
+    const llm = comps.find(c => c.id === 'llm')!;
+    expect(llm.required).toBe(false);
+    expect(llm.status).toBe('absent');
+  });
+
+  it('searxng backend but not ready → search degraded (not failed)', async () => {
+    const comps = await probeSetupStatus({ ...deps, searchBackend: () => 'searxng' });
+    const search = comps.find(c => c.id === 'search')!;
+    expect(search.status).toBe('degraded');
+    expect(search.required).toBe(false);
   });
 });
