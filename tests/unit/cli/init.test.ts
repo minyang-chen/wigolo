@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const {
   runSystemCheckMock,
@@ -11,6 +11,7 @@ const {
   runVerifyMock,
   probeSetupStatusMock,
   summarizeSetupMock,
+  runConfigMock,
 } = vi.hoisted(() => ({
   runSystemCheckMock: vi.fn(),
   renderBannerMock: vi.fn(() => 'BANNER\n'),
@@ -22,6 +23,7 @@ const {
   runVerifyMock: vi.fn(),
   probeSetupStatusMock: vi.fn(),
   summarizeSetupMock: vi.fn(),
+  runConfigMock: vi.fn(),
 }));
 
 vi.mock('../../../src/cli/tui/system-check.js', () => ({
@@ -63,6 +65,17 @@ vi.mock('../../../src/cli/tui/actions/setup-status.js', () => ({
   probeSetupStatus: probeSetupStatusMock,
   defaultProbeDeps: () => ({}),
   summarizeSetup: summarizeSetupMock,
+}));
+vi.mock('../../../src/cli/config.js', () => ({
+  runConfig: runConfigMock,
+}));
+vi.mock('../../../src/cli/tui/reporter-auto.js', () => ({
+  autoReporter: vi.fn(() => ({
+    start: vi.fn(),
+    success: vi.fn(),
+    fail: vi.fn(),
+    note: vi.fn(),
+  })),
 }));
 
 import { runInit } from '../../../src/cli/init.js';
@@ -242,5 +255,82 @@ describe('runInit', () => {
     } finally {
       cap.restore();
     }
+  });
+
+  it('non-interactive path invokes runWarmup(["--all"]) exactly once (no double-call)', async () => {
+    primeHappyPath();
+    const cap = capture();
+    try {
+      await runInit(['--non-interactive', '--agents=cursor']);
+      expect(runWarmupMock).toHaveBeenCalledTimes(1);
+      expect(runWarmupMock.mock.calls[0]?.[0]).toEqual(['--all']);
+      // Interactive delegate must not be reached on the non-interactive path.
+      expect(runConfigMock).not.toHaveBeenCalled();
+    } finally {
+      cap.restore();
+    }
+  });
+
+  describe('interactive (Ink) path', () => {
+    let prevTTY: boolean | undefined;
+    let prevCI: string | undefined;
+    let prevGha: string | undefined;
+
+    beforeEach(() => {
+      prevTTY = process.stdout.isTTY;
+      prevCI = process.env.CI;
+      prevGha = process.env.GITHUB_ACTIONS;
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      delete process.env.CI;
+      delete process.env.GITHUB_ACTIONS;
+      runConfigMock.mockResolvedValue(0);
+      runWarmupMock.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdout, 'isTTY', { value: prevTTY, configurable: true });
+      if (prevCI === undefined) delete process.env.CI; else process.env.CI = prevCI;
+      if (prevGha === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = prevGha;
+    });
+
+    it('runs the wizard then warms up the full tool set exactly once', async () => {
+      const cap = capture();
+      try {
+        const code = await runInit([]);
+        expect(code).toBe(0);
+        // Wizard delegate ran with --force-wizard.
+        expect(runConfigMock).toHaveBeenCalledTimes(1);
+        expect(runConfigMock.mock.calls[0]?.[0]).toEqual(['--force-wizard']);
+        // Warmup ran once with the full --all set (parity with non-interactive).
+        expect(runWarmupMock).toHaveBeenCalledTimes(1);
+        expect(runWarmupMock.mock.calls[0]?.[0]).toEqual(['--all']);
+      } finally {
+        cap.restore();
+      }
+    });
+
+    it('skips warmup and propagates the code when the wizard exits non-zero', async () => {
+      runConfigMock.mockResolvedValue(1);
+      const cap = capture();
+      try {
+        const code = await runInit([]);
+        expect(code).toBe(1);
+        expect(runWarmupMock).not.toHaveBeenCalled();
+      } finally {
+        cap.restore();
+      }
+    });
+
+    it('returns 1 and reports when warmup fails', async () => {
+      runWarmupMock.mockRejectedValue(new Error('browser download blocked'));
+      const cap = capture();
+      try {
+        const code = await runInit([]);
+        expect(code).toBe(1);
+        expect(cap.stderr.join('')).toMatch(/browser download blocked/);
+      } finally {
+        cap.restore();
+      }
+    });
   });
 });
