@@ -60,7 +60,25 @@ export async function runInit(args: string[]): Promise<number> {
     // which already requires !flags.plain.
     const { runConfig } = await import('./config.js');
     const configArgs = ['--force-wizard'];
-    return runConfig(configArgs);
+    const code = await runConfig(configArgs);
+    if (code !== 0) return code;
+
+    // Parity with the non-interactive path: the Ink wizard configures agents and
+    // settings but installs no tools. Run the full warmup AFTER the Ink shell has
+    // unmounted (runConfig has returned) so warmup's own progress output owns the
+    // terminal cleanly rather than fighting the live Ink render. Same flag set
+    // (`--all`) as runInitPlain, so both paths leave wigolo fully set up.
+    const { runWarmup } = await import('./warmup.js');
+    const { autoReporter } = await import('./tui/reporter-auto.js');
+    const reporter = autoReporter({ command: 'init' });
+    try {
+      await runWarmup(['--all'], reporter);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`Warmup failed: ${message}\n`);
+      return 1;
+    }
+    return 0;
   }
 
   // Plain / non-interactive mode — use the existing text-based flow
