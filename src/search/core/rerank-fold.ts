@@ -79,9 +79,11 @@ export async function foldRerankIntoOrdering(
     log.debug('rerank-fold failed, keeping composite ordering', { error: String(err) });
     return results;
   }
-  // candidates the provider never scored -> neutral 0 (treated as boundary).
+  // candidates the provider never scored -> treat as irrelevant (below the
+  // tier threshold), not relevant. Only bites a misbehaving injected rerank
+  // fn; the default provider scores every candidate (topK = candidates.length).
   for (let i = 0; i < logits.length; i++) {
-    if (!Number.isFinite(logits[i])) logits[i] = 0;
+    if (!Number.isFinite(logits[i])) logits[i] = RERANK_RELEVANCE_THRESHOLD - 1;
   }
 
   const normComposite = makeNormaliser(windowResults.map((res) => res.relevance_score));

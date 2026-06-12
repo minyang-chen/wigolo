@@ -61,19 +61,42 @@ describe('foldRerankIntoOrdering', () => {
     expect(out[0].evidence_score?.final).toBe(out[0].relevance_score);
   });
 
-  it('uses max logit across queries — a result relevant only to q2 keeps tier-1', async () => {
-    const results = [r('A', 0.9), r('B', 0.1)];
+  it('uses max logit across queries — A relevant to q1, B to q2, both outrank always-negative C', async () => {
+    const results = [r('A', 0.9), r('B', 0.1), r('C', 0.5)];
     const rerank = async (q: string, cands: { id: string; text: string }[]) => {
       const m = new Map<string, number>();
       for (const c of cands) {
         const url = c.text.split('\n')[0];
-        if (q === 'q1') m.set(c.id, url === 'A' ? 3 : -3);
+        if (url === 'C') m.set(c.id, -3);
+        else if (q === 'q1') m.set(c.id, url === 'A' ? 3 : -3);
         else m.set(c.id, url === 'B' ? 3 : -3);
       }
       return m;
     };
     const out = await foldRerankIntoOrdering(results, { queries: ['q1', 'q2'], rerank });
-    expect(out.every((x) => x.relevance_score >= 0.5)).toBe(true);
+    // A (relevant to q1) and B (relevant to q2) both keep tier-1 via max-over-queries;
+    // C is negative for every query so it falls to tier-0 and sorts last. A
+    // queries[0]-only impl would push B below C.
+    expect(out[out.length - 1].url).toBe('C');
+    expect(out[0].relevance_score).toBeGreaterThanOrEqual(0.5);
+    expect(out[1].relevance_score).toBeGreaterThanOrEqual(0.5);
+    expect(out[2].relevance_score).toBeLessThan(0.5);
+  });
+
+  it('a candidate the rerank fn never scores -> tier-0 (irrelevant), sorts last', async () => {
+    const results = [r('A', 0.5), r('B', 0.5)];
+    // injected fn scores only id '0' (A); B's id is absent from the map.
+    const rerank = async (_q: string, cands: { id: string; text: string }[]) => {
+      const m = new Map<string, number>();
+      for (const c of cands) {
+        if (c.id === '0') m.set(c.id, 5);
+      }
+      return m;
+    };
+    const out = await foldRerankIntoOrdering(results, { queries: ['q'], rerank });
+    expect(out.map((x) => x.url)).toEqual(['A', 'B']);
+    expect(out[0].relevance_score).toBeGreaterThanOrEqual(0.5);
+    expect(out[1].relevance_score).toBeLessThan(0.5);
   });
 
   it('rerank throwing -> input ordering preserved, no throw', async () => {
