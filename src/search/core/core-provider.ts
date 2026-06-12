@@ -151,6 +151,8 @@ export class CoreSearchProvider implements SearchProvider {
       language: input.language,
       time_range: input.time_range,
       exact_match: input.exact_match,
+      search_depth: depth,
+      reranker: getConfig().reranker,
     });
 
     let items: SearchResultItem[] = [];
