@@ -1,5 +1,64 @@
-import { describe, it, expect } from 'vitest';
-import { buildOllamaDoctorLines } from '../../../src/cli/doctor.js';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  buildOllamaDoctorLines,
+  resolveOllamaModelBounded,
+  sanitizeForTerminal,
+} from '../../../src/cli/doctor.js';
+
+describe('resolveOllamaModelBounded', () => {
+  it('returns the picked model when the pick resolves in time', async () => {
+    const pick = vi.fn(async () => 'llama3.1:8b');
+    expect(await resolveOllamaModelBounded('http://localhost:11434', pick, 400)).toBe('llama3.1:8b');
+  });
+
+  it('does NOT hang when the server accepts then stalls — aborts within the timeout', async () => {
+    // WHY: the unbounded fetch this replaces would hang doctor forever if the
+    // Ollama server accepted the connection then went silent (the exact case
+    // the probe defends against). A bounded signal must abort and degrade to
+    // "no model" rather than blocking the command indefinitely.
+    const pick = vi.fn(
+      (_url: string, _fetchImpl: typeof fetch, signal: AbortSignal) =>
+        new Promise<string>((_resolve, reject) => {
+          // Mimic the real pickOllamaModel: its fetch honors the signal, so an
+          // abort rejects the in-flight call.
+          signal.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+    );
+    const start = Date.now();
+    const result = await resolveOllamaModelBounded('http://localhost:11434', pick, 30);
+    const elapsed = Date.now() - start;
+    expect(result).toBeUndefined();
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  it('returns undefined (no throw) when the pick rejects', async () => {
+    const pick = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    expect(await resolveOllamaModelBounded('http://localhost:11434', pick, 400)).toBeUndefined();
+  });
+});
+
+describe('sanitizeForTerminal', () => {
+  it('strips control + ANSI escape bytes from an untrusted model name', () => {
+    // WHY: a compromised localhost server could return an ANSI-laden model name;
+    // printing it verbatim is a terminal-injection vector.
+    expect(sanitizeForTerminal('llama3.1\x1b[31m\x07evil')).toBe('llama3.1[31mevil');
+    expect(sanitizeForTerminal('clean-model')).toBe('clean-model');
+  });
+
+  it('keeps the injected model name out of the doctor line when it carries control bytes', () => {
+    const lines = buildOllamaDoctorLines({
+      llmConfigured: true,
+      ollamaActive: true,
+      reachable: true,
+      baseUrl: 'http://localhost:11434',
+      model: 'm\x1b[2Jx',
+    });
+    expect(lines.join('\n')).not.toMatch(/\x1b/);
+    expect(lines.join('\n')).toContain('m[2Jx');
+  });
+});
 
 describe('buildOllamaDoctorLines', () => {
   it('emits an enable-hint when a server is reachable and NO LLM is configured', () => {

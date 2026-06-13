@@ -36,7 +36,7 @@ const INIT_USAGE = [
   '  --agents=<csv>          Comma-separated agent ids (required with --non-interactive)',
   '  --skip-verify           Skip the post-install verify step',
   '  --plain                 Force plain (non-TUI) output',
-  '  --provider=<name>       LLM provider for research/agent: anthropic|openai|gemini',
+  '  --provider=<name>       LLM provider for research/agent: anthropic|openai|gemini|ollama',
   '  --search=<backend>      Search backend: core|searxng|hybrid',
   '  --help, -h              Show this message',
   '',

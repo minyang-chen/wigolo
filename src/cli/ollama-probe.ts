@@ -9,8 +9,8 @@
 
 import { DEFAULT_OLLAMA_BASE_URL } from '../integrations/cloud/llm/custom-backend.js';
 
-/** Short ceiling so the probe can never stall a CLI command. */
-const DEFAULT_PROBE_TIMEOUT_MS = 400;
+/** Short ceiling so the probe (and other CLI-side ollama fetches) never stall a command. */
+export const DEFAULT_PROBE_TIMEOUT_MS = 400;
 
 export interface OllamaProbeResult {
   reachable: boolean;

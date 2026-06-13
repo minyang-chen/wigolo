@@ -27,7 +27,7 @@ import { readKey } from '../security/key-store.js';
 import { setLogSuppression } from '../logger.js';
 import { isLlmConfigured } from '../integrations/cloud/llm/run.js';
 import { resolveCustomBackend, pickOllamaModel } from '../integrations/cloud/llm/custom-backend.js';
-import { probeOllama, resolveProbeBaseUrl, maybeOllamaHint } from './ollama-probe.js';
+import { probeOllama, resolveProbeBaseUrl, maybeOllamaHint, DEFAULT_PROBE_TIMEOUT_MS } from './ollama-probe.js';
 
 function out(line = ''): void { process.stderr.write(`${line}\n`); }
 
@@ -270,6 +270,38 @@ export function formatTlsTierLine(
  *
  * The hint NEVER auto-enables anything; it only tells the user the lever exists.
  */
+/**
+ * Strip control / ANSI bytes from an untrusted string before printing it to the
+ * terminal. A compromised localhost server could return an ANSI-laden model
+ * name; rendering it verbatim is a terminal-injection vector. Security LOW.
+ */
+export function sanitizeForTerminal(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\x00-\x1f\x7f]/g, '');
+}
+
+/**
+ * Resolve the active-ollama model for display, bounded by a short timeout so a
+ * stalled (connection-accepted-then-silent) server can never hang doctor. When
+ * the pick times out / fails, returns undefined and doctor degrades gracefully
+ * (the active section still prints the base URL). `pick` is injected for tests.
+ */
+export async function resolveOllamaModelBounded(
+  baseUrl: string,
+  pick: (url: string, fetchImpl: typeof fetch, signal: AbortSignal) => Promise<string> = pickOllamaModel,
+  timeoutMs: number = DEFAULT_PROBE_TIMEOUT_MS,
+): Promise<string | undefined> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await pick(baseUrl, fetch, controller.signal);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function buildOllamaDoctorLines(state: {
   llmConfigured: boolean;
   ollamaActive: boolean;
@@ -278,8 +310,8 @@ export function buildOllamaDoctorLines(state: {
   model?: string;
 }): string[] {
   if (state.ollamaActive) {
-    const lines = [`  local LLM (ollama): ${state.baseUrl}`];
-    if (state.model) lines.push(`    model:     ${state.model}`);
+    const lines = [`  local LLM (ollama): ${sanitizeForTerminal(state.baseUrl)}`];
+    if (state.model) lines.push(`    model:     ${sanitizeForTerminal(state.model)}`);
     if (!state.reachable) {
       lines.push('    note:      server not reachable now — research falls back to keyless synthesis');
     }
@@ -457,11 +489,10 @@ async function runDoctorInner(dataDir: string, opts?: DoctorOptions): Promise<nu
     const probe = needProbe ? await probeOllama(baseUrl) : { reachable: false };
     let model: string | undefined;
     if (ollamaActive && probe.reachable && !process.env.WIGOLO_LLM_MODEL) {
-      try {
-        model = await pickOllamaModel(baseUrl);
-      } catch {
-        // pickOllamaModel is itself fail-safe, but guard anyway — never break doctor.
-      }
+      // Bounded — a server that accepts the connection then stalls must never
+      // hang doctor (the unbounded fetch this replaces could). Times out into
+      // a graceful "no model" rather than blocking.
+      model = await resolveOllamaModelBounded(baseUrl);
     } else if (ollamaActive) {
       model = process.env.WIGOLO_LLM_MODEL;
     }
