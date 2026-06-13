@@ -142,6 +142,35 @@ describe('SmartRouter — anti-bot domain TLS-first routing (Wave-2 W4)', () => 
       expect(httpClient.fetch).toHaveBeenCalledOnce();
       expect(result.method).toBe('http');
     });
+
+    // Security boundary: the allowlist match is anchored — exact host OR a
+    // `.<domain>` subdomain suffix only. A lookalike must NOT be routed through
+    // the TLS tier. These pin the NEGATIVE half of the anchoring contract so a
+    // future refactor to includes()/unanchored endsWith() fails loudly instead
+    // of silently routing attacker-controlled lookalikes through TLS.
+    it('does NOT match a lookalike where the boundary char is not a dot (evil-stackoverflow.com)', async () => {
+      process.env.WIGOLO_TLS_TIER = 'off';
+      resetConfig();
+
+      const { router, httpClient, tlsFetcher } = build();
+      const result = await router.fetch('https://evil-stackoverflow.com/questions/1');
+
+      expect(tlsFetcher).not.toHaveBeenCalled();
+      expect(httpClient.fetch).toHaveBeenCalledOnce();
+      expect(result.method).toBe('http');
+    });
+
+    it('does NOT match a lookalike where the allowlist domain is only a prefix (stackoverflow.com.attacker.test)', async () => {
+      process.env.WIGOLO_TLS_TIER = 'off';
+      resetConfig();
+
+      const { router, httpClient, tlsFetcher } = build();
+      const result = await router.fetch('https://stackoverflow.com.attacker.test/questions/1');
+
+      expect(tlsFetcher).not.toHaveBeenCalled();
+      expect(httpClient.fetch).toHaveBeenCalledOnce();
+      expect(result.method).toBe('http');
+    });
   });
 
   describe('TLS-first failure on an allowlist domain falls back to HTTP', () => {
