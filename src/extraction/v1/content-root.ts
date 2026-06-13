@@ -24,15 +24,15 @@ function densest<T extends Element>(els: T[]): T | null {
   return best;
 }
 
-function selectRoot(document: Document): Element | null {
-  const mains = Array.from(document.querySelectorAll('main'));
+function selectRoot(body: Element): Element | null {
+  const mains = Array.from(body.querySelectorAll('main'));
   if (mains.length === 1) return mains[0];
   if (mains.length > 1) return densest(mains);
 
-  const roleMain = document.querySelector('[role="main"]');
+  const roleMain = body.querySelector('[role="main"]');
   if (roleMain) return roleMain;
 
-  const articles = Array.from(document.querySelectorAll('article'));
+  const articles = Array.from(body.querySelectorAll('article'));
   if (articles.length === 1) return articles[0];
   if (articles.length > 1) return densest(articles);
 
@@ -79,7 +79,7 @@ export function isolateContentRoot(html: string): string {
     const body = document.querySelector('body');
     if (!body) return html;
 
-    const root = selectRoot(document);
+    const root = selectRoot(body);
     if (!root) return html;
 
     const rootText = textLen(root);
