@@ -1,0 +1,62 @@
+import { describe, it, expect } from 'vitest';
+import { detectRareTerms, rareTermFactor } from '../../../../src/search/core/rare-terms.js';
+
+describe('detectRareTerms', () => {
+  it('detects hyphenated, digit-suffix, and snake_case compound tokens', () => {
+    const r = detectRareTerms('sqlite-vec vec0 vec_distance knn query');
+    expect(r.compoundTokens).toEqual(expect.arrayContaining(['sqlite-vec', 'vec0', 'vec_distance']));
+    expect(r.compoundTokens).not.toContain('knn'); // plain short token
+    expect(r.compoundTokens).not.toContain('query');
+  });
+
+  it('does NOT treat dates or bare version tokens as compounds', () => {
+    const r = detectRareTerms('release notes 2026-06-12 v18 update');
+    expect(r.compoundTokens).toHaveLength(0); // date has no alpha segment; v18 prefix <2 letters
+  });
+
+  it('emits a concept phrase for multi-word lowercase queries with no compound', () => {
+    const r = detectRareTerms('reciprocal rank fusion explained');
+    expect(r.compoundTokens).toHaveLength(0);
+    expect(r.conceptPhrase).toEqual(['reciprocal', 'rank', 'fusion', 'explained']);
+  });
+
+  it('suppresses concept phrase when a compound token dominates', () => {
+    const r = detectRareTerms('sqlite-vec virtual table');
+    expect(r.compoundTokens).toContain('sqlite-vec');
+    expect(r.conceptPhrase).toBeNull();
+  });
+});
+
+describe('rareTermFactor', () => {
+  const rareCompound = detectRareTerms('sqlite-vec vec0 knn query syntax');
+
+  it('boosts a doc containing the verbatim compound above one missing it', () => {
+    const hit = rareTermFactor(
+      { title: 'sqlite-vec: vec0 virtual tables', url: 'https://alexgarcia.xyz/sqlite-vec', snippet: 'knn query' },
+      rareCompound,
+    );
+    const miss = rareTermFactor(
+      { title: 'SQLite Home Page', url: 'https://sqlite.org', snippet: 'small fast database' },
+      rareCompound,
+    );
+    expect(hit).toBeGreaterThan(miss);
+    expect(miss).toBeLessThan(1); // missing all compounds => damped (generic-filler signal)
+  });
+
+  it('grades phrase contiguity: longer in-order run scores higher', () => {
+    const rare = detectRareTerms('reciprocal rank fusion explained');
+    const phrasePage = rareTermFactor(
+      { title: 'Reciprocal Rank Fusion', url: 'https://example.com/rrf', snippet: 'how RRF combines rankings' },
+      rare,
+    );
+    const dictPage = rareTermFactor(
+      { title: 'Reciprocal (mathematics)', url: 'https://en.wikipedia.org/wiki/Multiplicative_inverse', snippet: 'the reciprocal of a number' },
+      rare,
+    );
+    expect(phrasePage).toBeGreaterThan(dictPage);
+  });
+
+  it('returns 1.0 for plain queries with no rare terms', () => {
+    expect(rareTermFactor({ title: 'x', url: 'https://x.com', snippet: 'y' }, detectRareTerms('best laptop'))).toBe(1);
+  });
+});
