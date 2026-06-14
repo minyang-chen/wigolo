@@ -166,17 +166,18 @@ export async function runResearchPipeline(
     // the content gate both pass them because they ARE real, on-domain pages.
     // Dropping negatives here closes that gap.
     //
-    // But the cross-encoder also damps a *moderately*-relevant pool slightly
-    // below zero across the board — those are genuine on-topic sources, not
-    // junk, and dropping all of them collapses standard depth to a handful of
-    // strictly-positive survivors (C1 breadth wobble: standard returned 5-6,
-    // sometimes fewer). merged is sorted desc by score, so the top
-    // `minSources` entries are the reranker's best-ranked candidates: inside
-    // that breadth-keep window the floor is relaxed to drop only clear junk
-    // (HARD_JUNK_FLOOR), so a damped-but-relevant source back-fills the slot.
-    // Outside the window the strict `< 0` rule still drops genuine off-topic
-    // junk that ranks past the pool. i === 0 always survives so the pool is
-    // never emptied when the reranker damped everything below zero.
+    // But the cross-encoder's ABSOLUTE logits are miscalibrated per-query: on a
+    // niche query it damps the WHOLE pool below zero — including genuinely
+    // canonical, on-topic pages (live C1: sqlite.org/fts5.html, the sqlite-vec
+    // author's post, dev.to / deepwiki / kentcdodds explainers all scored below
+    // even -0.35) — so any fixed absolute floor collapses standard depth to ~1
+    // source. Its RELATIVE ordering stays meaningful, so merged (sorted desc by
+    // score) puts the most-on-topic first: inside the top-`minSources`
+    // breadth-keep window candidates are kept BY RANK regardless of a negative
+    // score (the url-shape + content gates above already removed junk, and rank
+    // is the quality bar here). Outside the window the strict `< 0` rule still
+    // drops genuine off-topic junk that ranks past the pool (it sorts below the
+    // on-topic survivors). i === 0 always survives so the pool is never emptied.
     const breadthKeep = Math.max(config.minSources, 1);
     const scoreKept: MergedResult[] = [];
     for (let i = 0; i < merged.length; i++) {

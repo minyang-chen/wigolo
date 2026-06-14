@@ -31,16 +31,6 @@ export interface ScoreFloorVerdict {
 // land below zero here even though they pass the url-shape + content gates.
 const SCORE_FLOOR = 0;
 
-// Clear-junk threshold for the top-N breadth keep. The cross-encoder damps a
-// *moderately*-relevant pool to slightly-below-zero logits (≈ -0.05 .. -0.3) —
-// those are genuine on-topic sources, and dropping them collapses standard
-// depth to a handful of strictly-positive survivors (the C1 breadth wobble:
-// standard returned 5-6, sometimes fewer). Off-topic junk lands distinctly
-// lower (benchmark fixtures: -0.4 and below). This floor lets the breadth keep
-// retain the damped-but-relevant band while still rejecting clear junk that the
-// top-N rank window would otherwise pull in when the genuine pool is shallow.
-const HARD_JUNK_FLOOR = -0.35;
-
 /**
  * Classify a candidate research source by its (post-rerank) relevance score.
  * Rejects strictly-negative scores — the cross-encoder's "not relevant"
@@ -49,21 +39,26 @@ const HARD_JUNK_FLOOR = -0.35;
  * no cross-encoder ran. The caller is responsible for never emptying the pool
  * (it keeps the single best source as a floor of last resort).
  *
- * `withinBreadthKeep` relaxes the threshold for the top-N best-ranked
- * candidates (by the reranker's own ordering): a slightly-negative,
- * damped-but-relevant source is kept so standard depth back-fills to >=6 clean
- * sources, while clearly-negative junk (below HARD_JUNK_FLOOR) is still dropped
- * even inside the keep window. Outside the keep window the strict `< 0` rule
- * applies unchanged, so genuine off-topic junk that ranks past the pool is
- * always rejected.
+ * `withinBreadthKeep` marks the top-N best-ranked candidates (by the reranker's
+ * own ordering) and disables the negative-score reject for them entirely. The
+ * cross-encoder's ABSOLUTE logits are miscalibrated per-query: on a niche query
+ * it damps the WHOLE pool below zero — including genuinely canonical, on-topic
+ * pages (live C1: sqlite.org/fts5.html, the sqlite-vec author's post, dev.to /
+ * deepwiki / kentcdodds explainers all scored below even -0.35), which collapses
+ * standard depth to ~1 source. Its RELATIVE ordering stays meaningful, so inside
+ * the keep window the quality bar is rank position + the upstream url-shape and
+ * content gates, NOT an absolute cutoff. Outside the window the strict `< 0`
+ * rule applies unchanged, so a genuinely off-topic page that ranks past the pool
+ * (it sorts below the on-topic survivors) is still rejected — that is what keeps
+ * junk out of the long tail while the window stays wide.
  */
 export function classifyScoreFloor(
   relevanceScore: number,
   withinBreadthKeep = false,
 ): ScoreFloorVerdict {
   if (!Number.isFinite(relevanceScore)) return { reject: false };
-  const floor = withinBreadthKeep ? HARD_JUNK_FLOOR : SCORE_FLOOR;
-  if (relevanceScore < floor) {
+  if (withinBreadthKeep) return { reject: false };
+  if (relevanceScore < SCORE_FLOOR) {
     return { reject: true, reason: 'negative-score' };
   }
   return { reject: false };
