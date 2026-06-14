@@ -137,17 +137,19 @@ describe('research pipeline relevance-score floor', () => {
     expect(result.sources.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('standard depth keeps >=6 on-topic sources when the reranker damps the whole pool slightly negative', async () => {
+  it('standard depth keeps >=6 on-topic sources when the reranker damps the whole pool slightly negative, junk ranking outside the window is still dropped', async () => {
     // WHY (C1 breadth wobble): the cross-encoder scores a *moderately*-relevant
     // pool slightly below zero across the board — these are genuine on-topic
     // articles (they pass url-shape + content gates), not the off-topic junk the
     // floor was built to drop. The old floor kept only merged[0] and dropped the
     // rest, collapsing standard depth to ~1-5 sources. The fix keeps the top
-    // minSources candidates by rank so standard reliably back-fills to >=6 when
-    // that many on-topic survivors exist. These 9 are the genuine pool; the two
-    // off-topic videos rank below the keep-floor and must still be dropped.
+    // minSources candidates by rank so standard reliably back-fills to >=6.
+    // Mirroring the live runs (56-61 candidates, far more than minSources=10),
+    // the genuine on-topic pool FILLS the keep window and the two off-topic
+    // videos (clearly more negative) sort BELOW it, outside the window, where
+    // the strict `< 0` floor still drops them.
     const results: RawSearchResult[] = [
-      ...Array.from({ length: 9 }, (_, i) => goodResult(i, -0.05 - i * 0.02)),
+      ...Array.from({ length: 12 }, (_, i) => goodResult(i, -0.05 - i * 0.02)),
       { title: 'Unrelated video', url: 'https://www.youtube.com/watch?v=junk1', snippet: 'unrelated', relevance_score: -0.95, engine: 'stub' },
       { title: 'Unrelated video 2', url: 'https://www.youtube.com/watch?v=junk2', snippet: 'unrelated', relevance_score: -0.99, engine: 'stub' },
     ];
@@ -159,6 +161,9 @@ describe('research pipeline relevance-score floor', () => {
     const urls = result.sources.map((s) => s.url);
     expect(urls).not.toContain('https://www.youtube.com/watch?v=junk1');
     expect(urls).not.toContain('https://www.youtube.com/watch?v=junk2');
+    const floorRejects = (result.rejected_sources ?? []).filter((r) => r.stage === 'score-floor');
+    expect(floorRejects.map((r) => r.url)).toContain('https://www.youtube.com/watch?v=junk1');
+    expect(floorRejects.map((r) => r.url)).toContain('https://www.youtube.com/watch?v=junk2');
   });
 
   it('standard depth keeps >=6 canonical sources even when the reranker damps the whole pool BELOW -0.35', async () => {
@@ -174,7 +179,7 @@ describe('research pipeline relevance-score floor', () => {
     // So any fixed absolute floor (0 or -0.35) collapses breadth.
     //
     // These 12 candidates ALL pass url-shape + the content gate and ALL score
-    // in the -0.1 .. -0.6 band (below -0.35), mirroring the live data. Inside
+    // well below -0.35 (-0.4 .. -0.95), mirroring the live data. Inside
     // the top-minSources (standard=10) rank window the fix trusts the
     // reranker's relative order + the upstream gates and keeps by rank
     // regardless of the negative score, so standard reliably back-fills to >=6.
