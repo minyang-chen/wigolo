@@ -63,11 +63,11 @@ claude mcp add wigolo -- npx @knockoutez/wigolo
 **Warmup (recommended, one-time):**
 ```bash
 npx @knockoutez/wigolo warmup          # installs browser engine + bootstraps search engine
-npx @knockoutez/wigolo warmup --all    # also installs Firefox, WebKit, ML reranker, embeddings, content extractor
+npx @knockoutez/wigolo warmup --all    # also installs Firefox, WebKit, ML reranker, and embeddings
 npx @knockoutez/wigolo warmup --force  # wipe search engine state and rebuild
 ```
 
-Warmup flags: `--force`, `--all`, `--trafilatura`, `--reranker`, `--firefox`, `--webkit`, `--embeddings`, `--lightpanda`.
+Warmup flags: `--force`, `--all`, `--reranker`, `--firefox`, `--webkit`, `--embeddings`, `--no-searxng`, `--verify`.
 
 ## Tools
 
