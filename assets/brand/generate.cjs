@@ -65,9 +65,9 @@ html,body{width:512px;height:512px;background:transparent}
   // --- Hero banner (rounded dark card, transparent corners) ---
   const bannerHtml = `<!doctype html><meta charset="utf8"><style>${FONTS}
 html,body{width:1200px;height:400px;background:transparent}
-.banner{width:1200px;height:400px;background:${BLACK};border-radius:36px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-.banner .wm{font-family:Inter;font-weight:${WEIGHT};letter-spacing:-0.055em;color:${OFFWHITE};font-size:150px;line-height:1}
-.banner .tag{font-family:Inter;font-weight:600;letter-spacing:-0.01em;color:${MUTED};font-size:32px}
+.banner{width:1200px;height:400px;background:${OFFWHITE};border-radius:36px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.banner .wm{font-family:Inter;font-weight:${WEIGHT};letter-spacing:-0.055em;color:${BLACK};font-size:150px;line-height:1}
+.banner .tag{font-family:Inter;font-weight:600;letter-spacing:-0.01em;color:#6f6862;font-size:32px}
 </style><div class="banner"><div class="wm">wigolo</div><div class="tag">The go-to web for your agent</div></div>`;
   const p3 = await browser.newPage({ viewport: { width: 1200, height: 400 }, deviceScaleFactor: 2 });
   await p3.setContent(bannerHtml, { waitUntil: 'load' });
