@@ -66,6 +66,30 @@ function looksBrandy(host: string): boolean {
   return BRAND_TLD_RE.test(host);
 }
 
+// Sentence-frame lead words: capitalized because they open a query, NOT
+// because they name an entity. A query that leads with an interrogative,
+// article, possessive, superlative, or imperative verb is a question/command
+// ("How to deploy Rails", "Best framework for api", "Configure nginx …"), not
+// an "Entity + generic tail" collision. Pattern-level stopword/verb set, never
+// entity-specific. Compared lowercase so casing of the lead doesn't matter.
+const SENTENCE_FRAME_LEADS: ReadonlySet<string> = new Set([
+  // interrogatives
+  'how', 'what', 'why', 'when', 'where', 'which', 'who', 'whose', 'whom',
+  // articles / demonstratives
+  'the', 'a', 'an', 'this', 'that', 'these', 'those',
+  // possessives
+  'my', 'your', 'our', 'their', 'its', 'his', 'her',
+  // superlatives / quantifiers
+  'best', 'top', 'most', 'worst', 'least', 'some', 'any', 'all',
+  // imperative / instructional verbs
+  'configure', 'deploy', 'deploying', 'build', 'building', 'use', 'using',
+  'setup', 'set', 'create', 'creating', 'add', 'adding', 'fix', 'fixing',
+  'install', 'installing', 'run', 'running', 'get', 'getting', 'make',
+  'making', 'compare', 'comparing', 'choose', 'choosing', 'understand',
+  'understanding', 'learn', 'learning', 'enable', 'disable', 'update',
+  'upgrade', 'migrate', 'remove', 'debug', 'test', 'write', 'find',
+]);
+
 // A token is an entity HEAD for the v2 collision path when the user typed it
 // as a Capitalized-word proper noun — a product/company/place name like
 // Phoenix, Apollo, Mercury, Comet, or a dotted brand like Next.js. This is a
@@ -75,11 +99,14 @@ function looksBrandy(host: string): boolean {
 //     an entity head, so it can't false-fire;
 //   - a bare ALL-CAPS acronym ("RAG tutorial", "HTTP guide") is NOT a
 //     brand-collision-prone name — acronyms disambiguate themselves and drive
-//     other routing (docs vertical), so they're excluded here.
+//     other routing (docs vertical), so they're excluded here;
+//   - a capitalized SENTENCE-FRAME lead (How/Best/Configure/…) opens a
+//     question or command, not an entity name — excluded via the stopword set.
 function isEntityToken(token: string): boolean {
   const stripped = token.replace(/[^A-Za-z0-9.\-]/g, '');
   if (stripped.length < 2) return false;
   if (!/^[A-Z][a-z]/.test(stripped)) return false;
+  if (SENTENCE_FRAME_LEADS.has(stripped.toLowerCase())) return false;
   return extractEntities(stripped).length > 0;
 }
 
@@ -118,13 +145,23 @@ export function isBrandCollisionProne(query: string): boolean {
   return false;
 }
 
-// The verbatim entity head of the query — the leading run of entity tokens so
-// a multi-token brand like "Comet ML" is anchored whole in the rewrite.
+// True for a short ALL-CAPS acronym token (ML, AI, DB, API) that trails a
+// capitalized head as part of the brand name ("Comet ML", "Vertex AI").
+function isAcronymSuffix(token: string): boolean {
+  const stripped = token.replace(/[^A-Za-z0-9]/g, '');
+  return /^[A-Z]{2,4}$/.test(stripped);
+}
+
+// The verbatim entity head of the query. Starts with the leading capitalized
+// proper-noun token, then absorbs a contiguous ALL-CAPS acronym token (ML/AI/
+// DB) that is part of the brand name so a multi-token brand like "Comet ML" is
+// anchored whole in the rewrite rather than split to just "Comet".
 function entityHead(query: string): string {
   const tokens = query.trim().split(/\s+/).filter(Boolean);
-  const head: string[] = [];
-  for (const t of tokens) {
-    if (isEntityToken(t)) head.push(t);
+  if (tokens.length === 0 || !isEntityToken(tokens[0])) return '';
+  const head: string[] = [tokens[0]];
+  for (let i = 1; i < tokens.length; i++) {
+    if (isEntityToken(tokens[i]) || isAcronymSuffix(tokens[i])) head.push(tokens[i]);
     else break;
   }
   return head.join(' ');

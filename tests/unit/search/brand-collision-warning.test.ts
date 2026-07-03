@@ -185,14 +185,45 @@ describe('detectEntityCollision (brand-collision v2)', () => {
     expect(w!.suggested_rewrites.some((r) => r.includes('Phoenix'))).toBe(true);
   });
 
-  it('includes a multi-token entity head verbatim in the rewrite', () => {
+  it('quotes the CONTIGUOUS multi-token entity head (e.g. "Comet ML") in the rewrite', () => {
+    // A capitalized head immediately followed by an all-caps token (ML/AI/DB)
+    // is part of the entity name — quoting only "Comet" would split the brand.
     const w = detectEntityCollision('Comet ML experiment tracking');
     expect(w).not.toBeNull();
-    expect(w!.suggested_rewrites.some((r) => r.includes('Comet'))).toBe(true);
+    expect(w!.suggested_rewrites.some((r) => r.includes('"Comet ML"'))).toBe(true);
   });
 
   it('returns null on a pure technical query with no generic tail', () => {
     expect(detectEntityCollision('pgvector hnsw ef_search tuning')).toBeNull();
+  });
+
+  // BLOCKER I2 — sentence-frame leads must NOT read as entity heads. An
+  // interrogative/article/imperative-verb first token is not a brand, even
+  // though it is capitalized and a generic-tail noun follows.
+  it('does NOT fire on an interrogative lead ("How to deploy Rails")', () => {
+    expect(detectEntityCollision('How to deploy Rails')).toBeNull();
+  });
+
+  it('does NOT fire on an imperative-verb lead ("Configure nginx reverse proxy")', () => {
+    expect(detectEntityCollision('Configure nginx reverse proxy')).toBeNull();
+  });
+
+  it('does NOT fire on an imperative-verb lead ("Deploy app to kubernetes")', () => {
+    expect(detectEntityCollision('Deploy app to kubernetes')).toBeNull();
+  });
+
+  it('does NOT fire on a superlative/article lead ("Best framework for api development")', () => {
+    expect(detectEntityCollision('Best framework for api development')).toBeNull();
+  });
+
+  it('does NOT fire on an interrogative lead ("When to use a cache")', () => {
+    expect(detectEntityCollision('When to use a cache')).toBeNull();
+  });
+
+  it('still fires on a genuine capitalized brand head (Stripe)', () => {
+    const w = detectEntityCollision('Stripe payment api');
+    expect(w).not.toBeNull();
+    expect(w!.suggested_rewrites.some((r) => r.includes('Stripe'))).toBe(true);
   });
 });
 
@@ -224,5 +255,62 @@ describe('SearchOutput — entity-collision dual-dispatch is auditable', () => {
     expect(
       out.data.queries_executed!.some((q) => q.includes('Phoenix') && q !== 'Phoenix framework deployment'),
     ).toBe(true);
+  });
+
+  // BLOCKER I1 — the dual-dispatch must be gated on the SAME collision
+  // predicate as the warning. An ordinary query that merely has a capitalized
+  // head but no collision (no generic tail) must NOT pay a second dispatch nor
+  // pollute queries_executed with an entity variant, and must NOT warn.
+  it('does NOT add an entity variant for a capitalized-head query with no generic tail', async () => {
+    verticalState.general = [
+      makeEntry('bing', [makeResult('bing', 'https://example.com/a')]),
+    ];
+    const provider = new CoreSearchProvider();
+    const out = await provider.search(
+      { query: 'React hooks useEffect cleanup', include_content: false },
+      { router: undefined as never, samplingServer: undefined as never, engines: [], backendStatus: undefined as never },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.data.brand_collision_warning).toBeUndefined();
+    // No quoted-entity variant added; only the original (plus any rare-term
+    // variant, which is not entity-quoted).
+    expect(
+      (out.data.queries_executed ?? []).some((q) => q.includes('"React"')),
+    ).toBe(false);
+  });
+
+  it('does NOT add an entity variant nor warn for a plain proper-noun-lead prose query', async () => {
+    verticalState.general = [
+      makeEntry('bing', [makeResult('bing', 'https://example.com/a')]),
+    ];
+    const provider = new CoreSearchProvider();
+    const out = await provider.search(
+      { query: 'Amazon rainforest deforestation', include_content: false },
+      { router: undefined as never, samplingServer: undefined as never, engines: [], backendStatus: undefined as never },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.data.brand_collision_warning).toBeUndefined();
+    expect(
+      (out.data.queries_executed ?? []).some((q) => q.includes('"Amazon"')),
+    ).toBe(false);
+  });
+
+  it('does NOT add an entity variant nor warn for a sentence-lead question', async () => {
+    verticalState.general = [
+      makeEntry('bing', [makeResult('bing', 'https://example.com/a')]),
+    ];
+    const provider = new CoreSearchProvider();
+    const out = await provider.search(
+      { query: 'How to deploy Rails', include_content: false },
+      { router: undefined as never, samplingServer: undefined as never, engines: [], backendStatus: undefined as never },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.data.brand_collision_warning).toBeUndefined();
+    expect(
+      (out.data.queries_executed ?? []).some((q) => q.startsWith('"')),
+    ).toBe(false);
   });
 });

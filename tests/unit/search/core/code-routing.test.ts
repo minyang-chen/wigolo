@@ -255,7 +255,7 @@ describe('runV1Search — secondary-engine demotion (sub-ticket 2.2)', () => {
           makeResult(
             'mdn',
             'https://developer.mozilla.org/en-US/docs/Web/API/fetch',
-            'fetch() global function reference',
+            'javascript fetch api reference global function',
             'The fetch() method starts the process of fetching a resource from the network.',
           ),
         ],
@@ -264,11 +264,14 @@ describe('runV1Search — secondary-engine demotion (sub-ticket 2.2)', () => {
       makeEntry(
         'bing',
         [
+          // Snippet shares SOME query tokens ("fetch", "api") so the result is
+          // not filtered out entirely by the relevance threshold — this forces
+          // the assertion to prove ordering, not survival.
           makeResult(
             'bing',
             'https://random-blog.example.com/post',
-            'Unrelated marketing landing page',
-            'Generic promotional content with little topical overlap.',
+            'A fetch api opinion piece',
+            'Loose blog musings that mention fetch and api once each in passing.',
           ),
         ],
         { weight: 0.7, secondary: true },
@@ -282,10 +285,11 @@ describe('runV1Search — secondary-engine demotion (sub-ticket 2.2)', () => {
 
     const mdnIdx = out.results.findIndex((r) => r.url.includes('developer.mozilla.org'));
     const webIdx = out.results.findIndex((r) => r.url.includes('random-blog.example.com'));
+    // Both must be present — otherwise the ordering assertion passes trivially
+    // because the web result was dropped rather than demoted.
     expect(mdnIdx).toBeGreaterThanOrEqual(0);
-    if (webIdx !== -1) {
-      expect(mdnIdx).toBeLessThan(webIdx);
-    }
+    expect(webIdx).toBeGreaterThanOrEqual(0);
+    expect(mdnIdx).toBeLessThan(webIdx);
   });
 
   it('keeps a real MDN HTML-element page out of the top result for a database code query', async () => {

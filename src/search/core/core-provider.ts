@@ -274,11 +274,15 @@ export class CoreSearchProvider implements SearchProvider {
       // Brand-collision dual-dispatch: when a single-query call is an
       // "Entity + generic tail" collision (e.g. "Phoenix framework deployment"),
       // run an entity-qualified variant CONCURRENTLY so the entity head is
-      // anchored and its results RRF-merge with the plain query. Multi-query
-      // callers author their own variants, so we only fire on the single-query
-      // path.
+      // anchored and its results RRF-merge with the plain query. Gated on the
+      // SAME predicate the warning uses (detectEntityCollision) so an ordinary
+      // capitalized-head query with no collision ("React hooks useEffect
+      // cleanup", "Amazon rainforest deforestation") pays no extra dispatch.
+      // Multi-query callers author their own variants — single-query path only.
       const entityVariant =
-        category !== 'images' && queries.length === 1
+        category !== 'images' &&
+        queries.length === 1 &&
+        detectEntityCollision(queries[0]) !== null
           ? entityQualifiedRewrite(queries[0])
           : null;
       const dispatchQueries = [...queries];

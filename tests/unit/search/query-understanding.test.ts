@@ -134,6 +134,24 @@ describe('buildQueryUnderstanding — brand-collision v2 (proper-noun head + gen
     const u = buildQueryUnderstanding('TypeError undefined api reference', {});
     expect(u.is_brand_collision_prone).toBe(false);
   });
+
+  // BLOCKER I2 — a capitalized SENTENCE-FRAME lead (interrogative / article /
+  // imperative verb) is not an entity head, so an ordinary question that ends
+  // in a generic-tail noun must NOT be flagged brand-collision-prone.
+  it.each([
+    'How to deploy Rails',
+    'Configure nginx reverse proxy',
+    'Deploy app to kubernetes',
+    'Best framework for api development',
+    'When to use a cache',
+    'The framework guide for beginners',
+  ])('does NOT flag sentence-frame lead: "%s"', (q) => {
+    expect(buildQueryUnderstanding(q, {}).is_brand_collision_prone).toBe(false);
+  });
+
+  it('still flags a genuine capitalized brand head + generic tail', () => {
+    expect(buildQueryUnderstanding('Stripe payment api', {}).is_brand_collision_prone).toBe(true);
+  });
 });
 
 describe('CoreSearchProvider — query_understanding on output (sub-ticket 3.9)', () => {
