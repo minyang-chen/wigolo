@@ -6,7 +6,8 @@ import {
   extractWithSchemaDetailedAsync,
 } from '../extraction/schema.js';
 import { extractJsonLd } from '../extraction/jsonld.js';
-import { extractStructured } from '../extraction/structured.js';
+import { extractStructured, mergeGridTables } from '../extraction/structured.js';
+import { detectDivGridTables } from '../extraction/div-grid.js';
 import { getCachedContent, isExpired } from '../cache/store.js';
 import { fetchWithPlaywright } from '../fetch/playwright-tier.js';
 import { countTokens, truncateByTokens } from '../search/tokens.js';
@@ -333,7 +334,10 @@ export async function handleExtract(
         data = extractSelector(html, input.css_selector!, input.multiple ?? false);
         break;
       case 'tables':
-        data = extractTables(html);
+        // Merge <table>-derived rows with div/flex-grid card structures so a
+        // pricing page built from styled <div>s (no <table>) still returns a
+        // per-tier grid instead of an empty result.
+        data = mergeGridTables(extractTables(html), detectDivGridTables(html));
         break;
       case 'structured':
         data = extractStructured(html);
