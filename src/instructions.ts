@@ -36,6 +36,7 @@ Wigolo returns structured evidence — YOU write the final answer.
 - \`find_similar\` → \`cold_start\` string when local signals weak. Pass verbatim.
 - \`extract mode: "structured"\` → tables + definitions + jsonld + chart_hints + key_value_pairs in one call.
 - Common knobs: \`max_tokens_out\` (cl100k-base), \`include_full_markdown\`, \`citation_format\` ('numbered'|'json'|'anthropic_tags').
+- Optional keyless synthesis: set \`WIGOLO_LOCAL_LLM=auto\` to auto-detect a local language model server and route \`research\`/\`agent\`/\`extract\` synthesis through it (host sampling preferred, then local model, then deterministic evidence). Default off — no API key, no cloud call.
 
 ## Rules
 
@@ -86,6 +87,7 @@ Wigolo has no internal LLM. It returns *structured evidence* so YOU (the host LL
 - \`find_similar\` → \`cold_start\` string when local signals are weak. Pass to user verbatim.
 - \`extract\` \`mode: "structured"\` → tables + definitions + jsonld + chart_hints + key_value_pairs in one call.
 - \`fetch\` metadata → \`og_type\`, \`canonical_url\`, \`og_image\` when present.
+- Optional local language model tier: set \`WIGOLO_LOCAL_LLM=auto\` (or an explicit \`http(s)://\` endpoint) to auto-detect a keyless local language model and use it for synthesis. Choose the model with \`WIGOLO_LOCAL_LLM_MODEL\`. The fallback ladder is host sampling first, then the local language model, then deterministic evidence. Default off, so the keyless path is unchanged; a missing server degrades silently to deterministic synthesis.
 
 ## When to use which tool
 
