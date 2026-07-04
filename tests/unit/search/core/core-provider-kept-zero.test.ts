@@ -63,6 +63,33 @@ describe('core-provider kept-0 floor (dominant vertical vs correct general-engin
     expect(urls).not.toContain('https://correct-entity.example/c');
   });
 
+  it('does NOT rescue a floored engine whose sole survivor is genuine off-topic junk (fast path)', async () => {
+    // On the fast/none path there is no rerank guard to damp junk first, so the
+    // floor's rescue must itself refuse pure junk: an engine that returned only
+    // far-below-floor off-topic results stays fully dropped — the rescue is for
+    // correct-entity results that landed JUST below the floor, not any junk.
+    runV1Search.mockResolvedValue(
+      dispatchOf([
+        res('https://developer.mozilla.org/a', 0.95, 'mdn'),
+        res('https://developer.mozilla.org/b', 0.85, 'mdn'),
+        res('https://off-topic-junk.example/x', 0.006, 'bing'),
+        res('https://off-topic-junk.example/y', 0.004, 'bing'),
+      ]),
+    );
+    const provider = new CoreSearchProvider();
+    const out = await provider.search(
+      { query: 'ambiguous docs phrase', search_depth: 'fast', include_content: false },
+      { router: undefined } as never,
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const urls = out.data.results.map((r) => r.url);
+    // The junk engine is NOT rescued — its far-below-floor results stay dropped.
+    expect(urls).not.toContain('https://off-topic-junk.example/x');
+    expect(urls).not.toContain('https://off-topic-junk.example/y');
+    expect(urls).toContain('https://developer.mozilla.org/a');
+  });
+
   it('does NOT rescue when the general engine already has an above-floor survivor', async () => {
     runV1Search.mockResolvedValue(
       dispatchOf([

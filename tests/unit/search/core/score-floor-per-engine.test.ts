@@ -69,10 +69,42 @@ describe('applyScoreFloor — per-engine keep guarantee', () => {
     expect(dropped.map((r) => r.url)).toEqual(['https://b/1']);
   });
 
-  it('preserves overall input order in the kept set after rescue', () => {
+  it('does NOT rescue a floored engine whose best result is genuine far-below-floor junk', () => {
+    // The rescue is for correct-entity results that landed JUST below the floor,
+    // not for an engine that returned only off-topic junk. An engine whose best
+    // is far below the floor (< floor * min-fraction) stays dropped.
     const results = [
       e('https://a/1', 0.9, 'a'),
-      e('https://b/1', 0.02, 'b'),
+      e('https://junk/1', 0.006, 'junkengine'),
+      e('https://junk/2', 0.004, 'junkengine'),
+    ];
+    const { kept, dropped } = applyScoreFloor(results, DEFAULT_SEARCH_SCORE_FLOOR, { perEngineKeep: 1 });
+    const keptUrls = kept.map((r) => r.url);
+    // Only the on-merit result survives; the junk engine is not rescued.
+    expect(keptUrls).toEqual(['https://a/1']);
+    expect(dropped.map((r) => r.url)).toEqual(['https://junk/1', 'https://junk/2']);
+  });
+
+  it('rescues a just-below-floor best but not a far-below-floor best from the SAME dominated set', () => {
+    // Two floored-out engines: one has a plausibly-relevant result just below
+    // the floor (rescued), the other only far-below-floor junk (dropped).
+    const results = [
+      e('https://top/1', 0.9, 'dominant'),
+      e('https://close/1', 0.03, 'closeengine'),   // ~60% of the 0.05 floor → rescue
+      e('https://faraway/1', 0.003, 'farengine'),  // ~6% of floor → junk, drop
+    ];
+    const { kept } = applyScoreFloor(results, DEFAULT_SEARCH_SCORE_FLOOR, { perEngineKeep: 1 });
+    const keptUrls = kept.map((r) => r.url);
+    expect(keptUrls).toContain('https://close/1');
+    expect(keptUrls).not.toContain('https://faraway/1');
+  });
+
+  it('preserves overall input order in the kept set after rescue', () => {
+    // b/1 sits just below the floor but above the rescue-min (0.05*0.5=0.025),
+    // so it is a plausibly-relevant rescue, not junk.
+    const results = [
+      e('https://a/1', 0.9, 'a'),
+      e('https://b/1', 0.03, 'b'),
       e('https://a/2', 0.6, 'a'),
     ];
     const { kept } = applyScoreFloor(results, DEFAULT_SEARCH_SCORE_FLOOR, { perEngineKeep: 1 });

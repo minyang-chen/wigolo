@@ -41,9 +41,23 @@ export interface ScoreFloorOptions {
    * survivor, so an engine already represented above the floor is never given a
    * second below-floor slot. Budget-bounded to `perEngineKeep` rescues per
    * engine so a floored engine can't refill the whole slice with junk.
+   *
+   * The rescue is ALSO gated on a minimum relevance: an engine's best
+   * below-floor result is only rescued when it is plausibly-relevant-just-
+   * below-floor, i.e. `best >= floor * RESCUE_MIN_FLOOR_FRACTION`. An engine
+   * that returned only genuine far-below-floor junk stays dropped — on the
+   * fast/none path there is no rerank guard to damp junk first, so the floor's
+   * own rescue must refuse it.
    */
   perEngineKeep?: number;
 }
+
+// A rescued engine's best below-floor result must be at least this fraction of
+// the floor to count as plausibly-relevant-just-below-floor rather than junk.
+// At the 0.05 default floor this is a 0.025 cutoff: correct-entity results that
+// landed just under the floor (observed at ~0.02-0.03 in the kept-0 case) are
+// rescued, while genuine off-topic junk (near-zero, ~0.001-0.01) stays dropped.
+const RESCUE_MIN_FLOOR_FRACTION = 0.5;
 
 /**
  * Partition a ranked result set by a relevance-score floor.
@@ -87,6 +101,7 @@ export function applyScoreFloor<T extends { relevance_score: number; engine?: st
   const rescued = new Set<number>();
   const perEngineKeep = opts.perEngineKeep ?? 0;
   if (perEngineKeep > 0) {
+    const rescueMin = floor * RESCUE_MIN_FLOOR_FRACTION;
     const aboveFloorEngines = new Set<string>();
     const belowFloorByEngine = new Map<string, number[]>();
     for (let i = 0; i < results.length; i++) {
@@ -108,7 +123,10 @@ export function applyScoreFloor<T extends { relevance_score: number; engine?: st
         results[b].relevance_score - results[a].relevance_score || a - b,
       );
       for (let k = 0; k < Math.min(perEngineKeep, idxs.length); k++) {
-        rescued.add(idxs[k]);
+        // Only rescue a plausibly-relevant-just-below-floor result. An engine
+        // whose best is far below the floor returned only junk; leave it
+        // dropped rather than force pure junk into the slice.
+        if (results[idxs[k]].relevance_score >= rescueMin) rescued.add(idxs[k]);
       }
     }
   }
