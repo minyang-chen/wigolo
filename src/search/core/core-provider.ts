@@ -27,6 +27,7 @@ import {
   detectEntityCollision,
   detectLexicalCollision,
   entityQualifiedRewrite,
+  topCollisionRewrite,
 } from './brand-collision.js';
 import { computeFreshnessSignal } from './freshness.js';
 import { buildQueryUnderstanding } from './query-understanding.js';
@@ -317,6 +318,22 @@ export class CoreSearchProvider implements SearchProvider {
         detectEntityCollision(queries[0]) !== null
           ? entityQualifiedRewrite(queries[0])
           : null;
+      // Brand/lexical-collision dual-dispatch: a QUERY-ONLY collision the
+      // entity path does NOT already handle — a short common-noun brand
+      // collision ("next", "apple mint") or a single-token dev-term lexical
+      // collision ("useState"). Anchors the top disambiguating rewrite from
+      // detectBrandCollision/detectLexicalCollision so the correct-entity
+      // results RRF-merge with the plain query rather than being crowded out.
+      // Same concurrent one-extra-dispatch budget the entityVariant uses;
+      // suppressed when the entity variant already fired (no triple dispatch),
+      // when error-intent owns the query, and on multi-query/image callers.
+      const collisionVariant =
+        category !== 'images' &&
+        queries.length === 1 &&
+        errorTokens.length === 0 &&
+        entityVariant === null
+          ? topCollisionRewrite(queries[0])
+          : null;
       const dispatchQueries = [...queries];
       if (rareVariant && rareVariant.trim() !== queries[0]?.trim()) {
         dispatchQueries.push(rareVariant);
@@ -328,6 +345,14 @@ export class CoreSearchProvider implements SearchProvider {
       ) {
         dispatchQueries.push(entityVariant);
         log.debug('entity-collision variant firing', { original: queries[0], variant: entityVariant });
+      }
+      if (
+        collisionVariant &&
+        collisionVariant.trim().toLowerCase() !== queries[0]?.trim().toLowerCase() &&
+        !dispatchQueries.some((q) => q.trim().toLowerCase() === collisionVariant.trim().toLowerCase())
+      ) {
+        dispatchQueries.push(collisionVariant);
+        log.debug('brand/lexical-collision variant firing', { original: queries[0], variant: collisionVariant });
       }
       // Error-token bare-token variant: recovers the on-target results engines
       // return for the atomic token alone but miss on the long natural-language
@@ -385,6 +410,9 @@ export class CoreSearchProvider implements SearchProvider {
       }
       if (entityVariant && dispatchQueries.includes(entityVariant)) {
         autoRewrites.push(entityVariant);
+      }
+      if (collisionVariant && dispatchQueries.includes(collisionVariant)) {
+        autoRewrites.push(collisionVariant);
       }
       queriesExecuted.length = 0;
       queriesExecuted.push(...dispatchQueries);

@@ -271,6 +271,55 @@ export function detectEntityCollision(query: string): BrandCollisionWarning | nu
   };
 }
 
+/**
+ * The single top disambiguating rewrite for a query that is QUERY-ONLY
+ * collision-prone — i.e. detectable without looking at any result URLs. Two
+ * cases, both mirroring an existing detector's rewrites:
+ *
+ *   1. A short common-noun brand collision (`isBrandCollisionProne` case 1,
+ *      e.g. "next", "apple mint") → the top of `suggestRewrites` — the same
+ *      rewrites `detectBrandCollision` emits once a brand TLD is seen in the
+ *      top-3. Anchored here on the query alone so it can dispatch CONCURRENTLY
+ *      with the primary wave (the warning still gates on the top-3 as before).
+ *   2. A single-token dev-term lexical collision (`detectLexicalCollision`,
+ *      e.g. "useState") → that detector's top rewrite.
+ *
+ * Excluded on purpose (handled elsewhere or not query-only):
+ *   - the proper-noun-head + generic-tail case (`detectEntityCollision`) —
+ *     already auto-dispatched via `entityQualifiedRewrite`; returning null here
+ *     avoids a duplicate third dispatch;
+ *   - any error-token query (`isBrandCollisionProne` already rejects these).
+ *
+ * Returns null when the query is not query-only collision-prone or the rewrite
+ * would be identical to the query.
+ */
+export function topCollisionRewrite(query: string): string | null {
+  const q = query.trim();
+  if (!q) return null;
+
+  const tokens = q.split(/\s+/).filter(Boolean);
+  // Case 1: short (<=2 token) all-common-noun brand collision. Skip the
+  // proper-noun-head case — detectEntityCollision owns its dispatch.
+  const shortCommonNoun =
+    tokens.length <= 2 &&
+    tokens.length > 0 &&
+    tokens.every((t) => COMMON_NOUNS.has(t.toLowerCase())) &&
+    !queryHasErrorToken(q);
+  if (shortCommonNoun) {
+    const rewrite = suggestRewrites(q)[0];
+    if (rewrite && rewrite.trim() !== q) return rewrite;
+  }
+
+  // Case 2: single-token dev-term lexical collision.
+  const lexical = detectLexicalCollision(q);
+  if (lexical) {
+    const rewrite = lexical.suggested_rewrites[0];
+    if (rewrite && rewrite.trim() !== q) return rewrite;
+  }
+
+  return null;
+}
+
 // Cheap normalised-edit-distance bounded at maxDist+1. Caller only cares
 // whether the distance is <= maxDist; abort early once the dp row min
 // exceeds the budget. Avoids the full O(m*n) when most queries are far
