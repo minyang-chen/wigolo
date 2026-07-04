@@ -26,6 +26,13 @@ export interface Config {
    * always clamped to the stage budget. `0`/undefined preserves the legacy
    * small per-URL budget regardless of candidate count. */
   searchNarrowSetBudgetMs: number;
+  /** Max candidate count for which a domain-narrowed (`include_domains`) search
+   * forces the browser-render path during enrichment. JS-heavy documentation
+   * SPAs hand back an empty shell over the HTTP tier; rendering recovers real
+   * content. Bounded to a FEW URLs so latency/cost stays controlled — broad
+   * (non-domain-narrowed, many-URL) searches never escalate. `0` disables the
+   * escalation entirely. */
+  searchNarrowRenderMaxCandidates: number;
   /** Pre-launch the browser engine before search enrichment so the first
    * hydration fetch doesn't pay the browser cold-start inline. Latency-only —
    * no change to results. Defaults on; set false to disable. */
@@ -104,6 +111,23 @@ export interface Config {
   llmBaseUrl: string | null;
   llmCacheTtlDays: number;
   llmMaxCallsPerRequest: number;
+  /**
+   * Opt-in auto-detect ladder for a local language model server. Resolves
+   * `WIGOLO_LOCAL_LLM` env > persisted `localLlm` > default:
+   *   - 'off'  : disabled (DEFAULT) — behavior is unchanged from before this
+   *              knob existed; no probe is ever made.
+   *   - 'auto' : probe the default local endpoint and use it when reachable.
+   *   - an http(s):// URL : probe that explicit endpoint instead of the default.
+   * Any other value normalizes to 'off' (fail-safe). Consumed by
+   * `resolveLocalModelTier()`; never mutates the keyless / cloud LLM path.
+   */
+  localLlm: 'off' | 'auto' | string;
+  /**
+   * Preferred model name for the local-LLM tier. `null` lets the tier
+   * auto-pick an installed model. Resolves `WIGOLO_LOCAL_LLM_MODEL` env >
+   * persisted `localLlmModel` > null.
+   */
+  localLlmModel: string | null;
   /**
    * TLS-impersonation HTTP tier mode:
    *   - 'off'  : tier disabled, current pipeline unchanged (DEFAULT)
@@ -255,6 +279,7 @@ export function getConfig(): Config {
     searchStageBudgetDeepMs: envInt('SEARCH_STAGE_BUDGET_DEEP_MS', 10000, settings, 'searchStageBudgetDeepMs'),
     searchTotalTimeoutMs: envInt('SEARCH_TOTAL_TIMEOUT_MS', 30000, settings, 'searchTotalTimeoutMs'),
     searchNarrowSetBudgetMs: envInt('SEARCH_NARROW_SET_BUDGET_MS', 8000, settings, 'searchNarrowSetBudgetMs'),
+    searchNarrowRenderMaxCandidates: envInt('SEARCH_NARROW_RENDER_MAX_CANDIDATES', 3, settings, 'searchNarrowRenderMaxCandidates'),
     searchPrewarmBrowser: envBool('SEARCH_PREWARM_BROWSER', true, settings, 'searchPrewarmBrowser'),
     searchMojeekProbeOnly: envBool('WIGOLO_MOJEEK_PROBE_ONLY', true, settings, 'searchMojeekProbeOnly'),
     validateTimeoutMs: envInt('VALIDATE_TIMEOUT_MS', 5000, settings, 'validateTimeoutMs'),
@@ -338,6 +363,17 @@ export function getConfig(): Config {
     llmBaseUrl: envStr('WIGOLO_LLM_BASE_URL', null, settings, 'llmBaseUrl'),
     llmCacheTtlDays: envInt('WIGOLO_LLM_CACHE_TTL_DAYS', 7, settings, 'llmCacheTtlDays'),
     llmMaxCallsPerRequest: envInt('WIGOLO_LLM_MAX_CALLS_PER_REQUEST', 1, settings, 'llmMaxCallsPerRequest'),
+    localLlm: (() => {
+      const raw = envStr('WIGOLO_LOCAL_LLM', null, settings, 'localLlm');
+      if (!raw) return 'off';
+      const lower = raw.toLowerCase();
+      if (lower === 'auto' || lower === 'off') return lower;
+      // An explicit OpenAI-compatible endpoint is a valid third value; keep it
+      // verbatim so the resolver can probe it. Anything else is a typo → off.
+      if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+      return 'off';
+    })(),
+    localLlmModel: envStr('WIGOLO_LOCAL_LLM_MODEL', null, settings, 'localLlmModel'),
     tlsTier: (() => {
       const raw = (envStr('WIGOLO_TLS_TIER', 'off', settings, 'tlsTier') ?? 'off').toLowerCase();
       return raw === 'auto' || raw === 'on' ? (raw as 'auto' | 'on') : 'off';

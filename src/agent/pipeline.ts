@@ -8,11 +8,13 @@ import {
   checkSamplingSupport,
 } from '../search/sampling.js';
 import { isLlmConfiguredWithKeyStore, runLlmText } from '../integrations/cloud/llm/run.js';
+import { resolveLocalModelTier } from '../integrations/cloud/llm/local-tier.js';
 import type {
   AgentInput,
   AgentOutput,
   AgentSource,
   AgentStep,
+  GridConfidence,
   SearchEngine,
 } from '../types.js';
 import type { SmartRouter } from '../fetch/router.js';
@@ -91,9 +93,9 @@ export async function runAgentPipeline(
           time_ms: Date.now() - extractStart,
         });
 
-        if (schemaResult) {
+        if (schemaResult && !schemaResult.lowConfidence) {
           return {
-            result: schemaResult,
+            result: schemaResult.data,
             sources: stripRawHtml(sources),
             pages_fetched: pagesFetched,
             steps,
@@ -102,7 +104,13 @@ export async function runAgentPipeline(
           };
         }
 
-        schemaWarning = `schema extraction returned no matching fields from ${fetchedCount} fetched sources — falling back to free-text synthesis`;
+        // A low-confidence match (a wrong-shape / absurd-cardinality grid) is
+        // worse than honest prose — the bench judged typed-but-wrong rows 3.0
+        // vs prose 6.5. Fall through to synthesis with an explicit warning
+        // rather than emit the misleading structured object.
+        schemaWarning = schemaResult
+          ? `schema match rejected on low shape-confidence (${schemaResult.reason}) — falling back to free-text synthesis`
+          : `schema extraction returned no matching fields from ${fetchedCount} fetched sources — falling back to free-text synthesis`;
       }
     }
 
@@ -169,15 +177,22 @@ function stripRawHtml(sources: AgentSource[]): AgentSource[] {
   return sources.map(({ rawHtml: _rawHtml, ...rest }) => rest);
 }
 
+interface SchemaExtractionOutcome {
+  data: Record<string, unknown>;
+  lowConfidence: boolean;
+  reason?: string;
+}
+
 function applySchemaExtraction(
   sources: AgentSource[],
   schema: JsonSchema,
-): Record<string, unknown> | null {
+): SchemaExtractionOutcome | null {
   try {
     const fetchedSources = sources.filter((s) => s.fetched && s.markdown_content.length > 0);
     if (fetchedSources.length === 0) return null;
 
     const mergedData: Record<string, unknown> = {};
+    const mergedConfidence: Record<string, GridConfidence> = {};
 
     for (const source of fetchedSources) {
       try {
@@ -187,12 +202,13 @@ function applySchemaExtraction(
         const html = source.rawHtml && source.rawHtml.length > 0
           ? source.rawHtml
           : `<html><body>${source.markdown_content}</body></html>`;
-        const extracted = extractWithSchemaDetailed(html, schema).values;
+        const det = extractWithSchemaDetailed(html, schema);
 
-        for (const [key, value] of Object.entries(extracted)) {
+        for (const [key, value] of Object.entries(det.values)) {
           if (value !== undefined && value !== null && value !== '') {
             if (!(key in mergedData)) {
               mergedData[key] = value;
+              if (det.confidence?.[key]) mergedConfidence[key] = det.confidence[key];
             }
           }
         }
@@ -204,13 +220,52 @@ function applySchemaExtraction(
       }
     }
 
-    return Object.keys(mergedData).length > 0 ? mergedData : null;
+    if (Object.keys(mergedData).length === 0) return null;
+
+    const reject = detectLowConfidence(schema, mergedConfidence);
+    return { data: mergedData, lowConfidence: reject !== null, reason: reject ?? undefined };
   } catch (err) {
     log.warn('schema extraction phase failed', {
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
   }
+}
+
+// A grid-sourced array field is worth prose over its typed rows only when the
+// matcher clearly locked onto the WRONG grid — NOT when an optional array
+// column merely came up empty. Two generic signals:
+//   (a) LOW SCORE — the grid bound fewer than two item properties, so it is a
+//       thin/incidental match rather than a real tier grid.
+//   (b) ABSURD CARDINALITY — far more rows than a plan/tier ask ever has (the
+//       real bug: a 36-row add-on dump masquerading as tiers). A plausibly
+//       sized featureless name+price tier grid (2-~12 rows) is a GOOD honest
+//       answer and must be kept, empty key_features and all.
+// Keyed on the confidence signal + row count only, never on any site or field
+// name; a schema with no array item field is never inspected.
+const MIN_TIER_GRID_SCORE = 20;
+const MAX_PLAUSIBLE_TIER_ROWS = 12;
+
+function detectLowConfidence(
+  schema: JsonSchema,
+  confidence: Record<string, GridConfidence>,
+): string | null {
+  const props = schema.properties;
+  if (!props) return null;
+  for (const [field, fieldSchema] of Object.entries(props)) {
+    const conf = confidence[field];
+    if (!conf) continue;
+    if (fieldSchema.type !== 'array' || !fieldSchema.items?.properties) continue;
+    // (b) Absurd cardinality for a tier/plan-shaped ask.
+    if (conf.rowCount > MAX_PLAUSIBLE_TIER_ROWS) {
+      return `field "${field}" matched an implausibly large grid (${conf.rowCount} rows) for a tier/plan ask`;
+    }
+    // (a) Low shape score — a thin match on too few item properties.
+    if (conf.score < MIN_TIER_GRID_SCORE) {
+      return `field "${field}" matched a low-confidence grid (score ${conf.score})`;
+    }
+  }
+  return null;
 }
 
 async function synthesizeResult(
@@ -268,12 +323,36 @@ async function synthesizeResult(
     }
   }
 
+  // Middle rung of the ladder (host-sampling > local model > deterministic):
+  // when no cloud key / explicit provider ran the synthesis above and host
+  // sampling did not answer, use the C0 opt-in local-model tier if reachable.
+  // The tier is self-configuring so it fires even when WIGOLO_LOCAL_LLM is the
+  // only signal. Null tier (the keyless default) makes zero network calls and
+  // drops straight through to the deterministic evidence fallback below.
+  const tier = await resolveLocalModelTier();
+  if (tier) {
+    try {
+      // Route via the additive backend override — a single-call endpoint that
+      // reads/mutates NO process.env, so concurrent syntheses can never corrupt
+      // a shared WIGOLO_LLM_PROVIDER.
+      const result = await synthesizeViaLlmRunner(prompt, fetchedSources, {
+        backend: { url: tier.endpoint, model: tier.model },
+      });
+      if (result) return { result, samplingUsed: false, llmUsed: true };
+    } catch (err) {
+      log.warn('local-tier synthesis failed, using evidence fallback', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   return { result: buildFallbackSynthesis(prompt, fetchedSources), samplingUsed: false };
 }
 
 async function synthesizeViaLlmRunner(
   prompt: string,
   sources: AgentSource[],
+  opts: { backend?: { url: string; model: string } } = {},
 ): Promise<string | null> {
   const maxCharsPerSource = 3000;
   const sourceBlocks = sources.map((s, i) => {
@@ -286,7 +365,11 @@ async function synthesizeViaLlmRunner(
     'synthesize a clear, well-organized response. Cite sources as [1], [2], etc.\n\n' +
     `User request: ${prompt}\n\n` +
     `Sources:\n${truncated}`;
-  const r = await runLlmText({ prompt: fullPrompt, maxTokens: 2000 });
+  const r = await runLlmText({
+    prompt: fullPrompt,
+    maxTokens: 2000,
+    ...(opts.backend ? { backend: opts.backend } : {}),
+  });
   return r.text && r.text.trim().length > 0 ? r.text.trim() : null;
 }
 
