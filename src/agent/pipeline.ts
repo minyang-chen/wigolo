@@ -221,7 +221,7 @@ function applySchemaExtraction(
 
     if (Object.keys(mergedData).length === 0) return null;
 
-    const reject = detectLowConfidence(schema, mergedData, mergedConfidence);
+    const reject = detectLowConfidence(schema, mergedConfidence);
     return { data: mergedData, lowConfidence: reject !== null, reason: reject ?? undefined };
   } catch (err) {
     log.warn('schema extraction phase failed', {
@@ -231,16 +231,22 @@ function applySchemaExtraction(
   }
 }
 
-// Reject a grid-sourced array field when its shape signal indicates the matcher
-// locked onto the WRONG grid: the schema's item declares an array-typed
-// property (e.g. key_features) but the selected grid left it unfilled. That is
-// exactly the name+price add-on dump masquerading as a name+price+features
-// tier list — many rows, empty features. Generic (keys on schema shape vs the
-// filled columns, never on any site/field name); a schema with no array item
-// property, or a grid that DID fill its array property, is never rejected.
+// A grid-sourced array field is worth prose over its typed rows only when the
+// matcher clearly locked onto the WRONG grid — NOT when an optional array
+// column merely came up empty. Two generic signals:
+//   (a) LOW SCORE — the grid bound fewer than two item properties, so it is a
+//       thin/incidental match rather than a real tier grid.
+//   (b) ABSURD CARDINALITY — far more rows than a plan/tier ask ever has (the
+//       real bug: a 36-row add-on dump masquerading as tiers). A plausibly
+//       sized featureless name+price tier grid (2-~12 rows) is a GOOD honest
+//       answer and must be kept, empty key_features and all.
+// Keyed on the confidence signal + row count only, never on any site or field
+// name; a schema with no array item field is never inspected.
+const MIN_TIER_GRID_SCORE = 20;
+const MAX_PLAUSIBLE_TIER_ROWS = 12;
+
 function detectLowConfidence(
   schema: JsonSchema,
-  data: Record<string, unknown>,
   confidence: Record<string, GridConfidence>,
 ): string | null {
   const props = schema.properties;
@@ -249,12 +255,13 @@ function detectLowConfidence(
     const conf = confidence[field];
     if (!conf) continue;
     if (fieldSchema.type !== 'array' || !fieldSchema.items?.properties) continue;
-    const itemProps = fieldSchema.items.properties;
-    const requestsArrayProp = Object.values(itemProps).some((p) => p.type === 'array');
-    // The wrong-grid signal: an array-typed item property was requested but the
-    // matched grid could not fill it. A shape-complete tier grid fills it.
-    if (requestsArrayProp && !conf.arrayFilled) {
-      return `field "${field}" matched a grid missing its list column (${conf.rowCount} rows, shape-incomplete)`;
+    // (b) Absurd cardinality for a tier/plan-shaped ask.
+    if (conf.rowCount > MAX_PLAUSIBLE_TIER_ROWS) {
+      return `field "${field}" matched an implausibly large grid (${conf.rowCount} rows) for a tier/plan ask`;
+    }
+    // (a) Low shape score — a thin match on too few item properties.
+    if (conf.score < MIN_TIER_GRID_SCORE) {
+      return `field "${field}" matched a low-confidence grid (score ${conf.score})`;
     }
   }
   return null;

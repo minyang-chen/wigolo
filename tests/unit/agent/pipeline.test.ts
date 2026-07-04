@@ -355,6 +355,114 @@ describe('runAgentPipeline', () => {
     expect(result.warning).toBeUndefined();
   });
 
+  it('does NOT prose-fall-back for a FEATURELESS native <table> tier grid (real negative)', async () => {
+    // The blocker fix: a plain 3-row Plan|Price <table> under a
+    // {tiers:[{name,price,key_features[]}]} schema is a GOOD typed answer — an
+    // empty key_features column is honest, not wrong. The gate must NOT reject
+    // an optional array column that is merely unfilled; typed-correct beats
+    // prose. Only wrong shape (low score) or absurd cardinality reject.
+    const tableHtml =
+      '<html><body><table><thead><tr><th>Plan</th><th>Price</th></tr></thead>' +
+      '<tbody>' +
+      '<tr><td>Starter</td><td>$9</td></tr>' +
+      '<tr><td>Pro</td><td>$29</td></tr>' +
+      '<tr><td>Enterprise</td><td>$99</td></tr>' +
+      '</tbody></table></body></html>';
+    const router = {
+      fetch: vi.fn().mockResolvedValue({
+        url: 'https://example.com',
+        finalUrl: 'https://example.com',
+        html: tableHtml,
+        contentType: 'text/html',
+        statusCode: 200,
+        method: 'http' as const,
+        headers: {},
+      }),
+    } as unknown as SmartRouter;
+    const engine = createStubEngine(defaultResults);
+    const input: AgentInput = {
+      prompt: 'Extract the pricing tiers',
+      schema: {
+        type: 'object',
+        properties: {
+          tiers: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                price: { type: 'string' },
+                key_features: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const result = await runAgentPipeline(input, [engine], router);
+
+    expect(typeof result.result).toBe('object');
+    const tiers = (result.result as Record<string, unknown>).tiers as Array<Record<string, unknown>>;
+    expect(Array.isArray(tiers)).toBe(true);
+    expect(tiers).toHaveLength(3);
+    expect(tiers[0].name).toBe('Starter');
+    expect(tiers[0].price).toBe('$9');
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('does NOT prose-fall-back for a FEATURELESS div-grid tier grid (real negative)', async () => {
+    // Same as above but the featureless tier grid is a div/flex card grid (no
+    // <ul><li> bullets → arrayFilled false). A plausibly-sized name+price tier
+    // grid must still return typed rows.
+    const gridHtml =
+      '<html><body><main><div class="pricing">' +
+      '<div class="tier"><h3>Free</h3><span class="price">$0</span></div>' +
+      '<div class="tier"><h3>Basic</h3><span class="price">$10</span></div>' +
+      '<div class="tier"><h3>Pro</h3><span class="price">$20</span></div>' +
+      '<div class="tier"><h3>Max</h3><span class="price">$40</span></div>' +
+      '</div></main></body></html>';
+    const router = {
+      fetch: vi.fn().mockResolvedValue({
+        url: 'https://example.com',
+        finalUrl: 'https://example.com',
+        html: gridHtml,
+        contentType: 'text/html',
+        statusCode: 200,
+        method: 'http' as const,
+        headers: {},
+      }),
+    } as unknown as SmartRouter;
+    const engine = createStubEngine(defaultResults);
+    const input: AgentInput = {
+      prompt: 'Extract the pricing tiers',
+      schema: {
+        type: 'object',
+        properties: {
+          tiers: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                price: { type: 'string' },
+                key_features: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const result = await runAgentPipeline(input, [engine], router);
+
+    expect(typeof result.result).toBe('object');
+    const tiers = (result.result as Record<string, unknown>).tiers as Array<Record<string, unknown>>;
+    expect(Array.isArray(tiers)).toBe(true);
+    expect(tiers).toHaveLength(4);
+    expect(result.warning).toBeUndefined();
+  });
+
   it('never leaks rawHtml into returned sources (schema + no-schema paths)', async () => {
     // rawHtml is internal fuel for schema extraction only. Left in the output
     // it ships hundreds of KB of raw page HTML per source and corrupts the
