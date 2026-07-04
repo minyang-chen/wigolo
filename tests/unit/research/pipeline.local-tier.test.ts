@@ -16,14 +16,14 @@ import type { SmartRouter } from '../../../src/fetch/router.js';
 vi.mock('../../../src/providers/extract-provider.js', () => ({
   getExtractProvider: vi.fn(async () => ({
     name: 'v1' as const,
-    extract: vi.fn().mockResolvedValue({
+    extract: vi.fn().mockImplementation(async (_html: string, url?: string) => ({
       title: 'Extracted Title',
-      markdown: '# Extracted Content\n\nArticle content about the topic.',
+      markdown: `# Extracted Content\n\nArticle content about the topic and framework reactivity primitives.${url ? ` Source ${url}.` : ''}`,
       metadata: {},
       links: [],
       images: [],
       extractor: 'defuddle' as const,
-    }),
+    })),
   })),
   _resetExtractProviderForTest: vi.fn(),
 }));
@@ -142,7 +142,7 @@ describe('research synthesis fires via the local-model tier', () => {
     expect(out.citations.length).toBeGreaterThan(0);
   });
 
-  it('keeps per-claim [n] citations index-aligned to the correct source through the tier path', async () => {
+  it('a LEADING UNFETCHED source is filtered from localSources and does NOT shift the [n] citation', async () => {
     vi.mocked(localTierModule.resolveLocalModelTier).mockResolvedValue({
       available: true,
       endpoint: 'http://localhost:11434',
@@ -150,22 +150,50 @@ describe('research synthesis fires via the local-model tier', () => {
       source: 'auto',
     });
 
-    // The model cites source [2] only (0-based idx 1). The returned citation
-    // must resolve to the SECOND source's url/title, not the first — proving
-    // the dedupe/remap did not shift the index.
+    // Three ranked results; the TOP-ranked (react.dev, 0.95) FAILS to fetch, so
+    // it stays in `sources` as an unfetched shell but is dropped from the
+    // fetched-view `localSources`. localSources therefore is [vue, svelte] while
+    // the full sources array leads with the unfetched react row.
+    const threeResults: RawSearchResult[] = [
+      { title: 'React Hooks', url: 'https://react.dev/hooks', snippet: 'react', relevance_score: 0.95, engine: 'stub' },
+      { title: 'Vue Reactivity', url: 'https://vuejs.org/guide', snippet: 'vue', relevance_score: 0.9, engine: 'stub' },
+      { title: 'Svelte Runes', url: 'https://svelte.dev/runes', snippet: 'svelte', relevance_score: 0.85, engine: 'stub' },
+    ];
+    const router = {
+      fetch: vi.fn().mockImplementation((url: string) => {
+        if (url.includes('react.dev')) return Promise.reject(new Error('fetch failed'));
+        return Promise.resolve({
+          url, finalUrl: url,
+          html: `<html><body><p>Reactivity content about the framework primitives for ${url.includes('vue') ? 'Vue' : 'Svelte'} state.</p></body></html>`,
+          contentType: 'text/html', statusCode: 200, method: 'http' as const, headers: {},
+        });
+      }),
+    } as unknown as SmartRouter;
+
+    // The model cites source [2] in ITS numbered view (localSources), i.e.
+    // 0-based idx 1 = the SECOND fetched source (Svelte). If the pipeline
+    // wrongly indexed into the full `sources` array instead of localSources, [2]
+    // would resolve to Vue (the second full-array row) — the shift this guards.
     vi.spyOn(synthesisLocalModule, 'synthesizeLocal').mockResolvedValue({
-      text: 'Only the Vue source is cited here [2].',
+      text: 'The second fetched source is cited [2].',
       citations: [1],
     });
 
-    const input: ResearchInput = { question: 'modern reactivity primitives', depth: 'quick' };
-    const out = await runResearchPipeline(input, [createStubEngine(RESULTS)], createStubRouter());
+    const input: ResearchInput = { question: 'framework reactivity primitives', depth: 'quick' };
+    const out = await runResearchPipeline(input, [createStubEngine(threeResults)], router);
 
     expect(out.error).toBeUndefined();
+    // The leading react row is present in sources but unfetched.
+    const reactRow = out.sources.find((s) => s.url.includes('react.dev'));
+    expect(reactRow?.fetched).toBe(false);
+
+    // Exactly one citation; its index is LOCAL (into localSources), 1-based.
     expect(out.citations).toHaveLength(1);
     const c = out.citations[0];
     expect(c.index).toBe(2);
-    // Second source in the fetched set is the Vue page.
-    expect(out.sources[c.index - 1]?.url).toBe(out.sources[1]?.url);
+    // The citation must resolve to the SECOND FETCHED source (Svelte), proving
+    // the leading unfetched row did not shift the index into the full array.
+    expect(c.url).toContain('svelte.dev');
+    expect(c.url).not.toContain('vuejs.org');
   });
 });
