@@ -76,15 +76,15 @@ wigolo is a focused web layer for one agent on one machine — not a hosted SaaS
 
 ## Benchmark
 
-One query, run live inside a single AI-agent session and fanned out to four web tools at once — built-in **WebSearch**, **wigolo**, **Tavily**, and **Firecrawl** — then scored by the agent itself. The prompt: `postgres 18 async IO real-world benchmark`.
+One cold query, run live inside a single **Claude Fable 5** session and fanned out to four web tools on equal footing — built-in **WebSearch**, **wigolo**, **Tavily**, and **Exa** — then reported by the agent itself under one rule: judge on the evidence alone, no favoritism. The query: `when to choose logical vs streaming replication in Postgres`.
 
-wigolo matched the paid tools and pulled ahead. It surfaced the **same #1 source** as WebSearch (`postgresqlhtx.com`), returned as many results as Firecrawl, and was the **only** tool to hand back **real benchmark excerpts with an explainable per-result score** — pulling the concrete figure everyone else left on the table (`15,071ms → 5,723ms` on `io_uring`). Then it re-served the entire query **from local cache in ~3 ms, for $0** — no API key, nothing leaving the machine.
+The headline is in the report itself: **all four tools converged on the same core answer.** Same top source as the paid tools, same conclusions — parity demonstrated, not asserted. On top of that, wigolo was the only tool of the four to return **verbatim quoted excerpts pinned to byte-offset source spans with citation IDs**, an **explainable per-result score decomposition** (cross-encoder, lexical, engine consensus), and **live per-engine telemetry** — and when two of its results were weak, **its own scorer flagged them as junk on-screen**. The cloud tools earn their line too: Exa rendered the official docs' comparison matrix in full. Both edges, stated straight, by the same model that drove all four tools.
 
-One honest query, not a cherry-picked leaderboard — run your own and you'll see the same shape: wigolo trading blows with the paid tools, then leaving them behind the moment you re-query. Here's the full run:
+One honest query, not a leaderboard — run your own and you'll see the same shape: the keyless local tool standing shoulder to shoulder with the paid services, handing your agent evidence the others don't, at $0 with nothing leaving your machine. Here's the full run:
 
 <div align="center">
 
-<img alt="wigolo vs built-in WebSearch, Tavily, and Firecrawl on one real query" src="assets/wigolo-vs.gif" width="900">
+<img alt="wigolo vs built-in WebSearch, Tavily, and Exa on one real query, driven by Claude Fable 5" src="assets/wigolo-vs.gif" width="900">
 
 </div>
 
