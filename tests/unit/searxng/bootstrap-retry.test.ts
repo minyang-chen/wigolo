@@ -84,6 +84,7 @@ describe('backoffSchedule', () => {
 
 import { execSync, spawnSync } from 'node:child_process';
 import { BootstrapError, runStep, resolveSearchBackend, bootstrapNativeSearxng } from '../../../src/searxng/bootstrap.js';
+import { __resetResolvedContainerCli } from '../../../src/searxng/docker.js';
 
 describe('runStep', () => {
   beforeEach(() => { vi.clearAllMocks(); });
@@ -136,11 +137,20 @@ describe('runStep', () => {
 });
 
 describe('resolveSearchBackend — retry-aware failed state', () => {
+  // Retry-window/attempt-cap logic is platform-independent — pin to a
+  // supported platform so the win32 native-unsupported branch doesn't
+  // short-circuit these assertions when run on an actual Windows machine.
+  const originalPlatform = process.platform;
   beforeEach(() => {
     process.env = { ...process.env };
     delete process.env.SEARXNG_URL;
     resetConfig();
     vi.clearAllMocks();
+    __resetResolvedContainerCli();
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  });
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
   });
 
   it('returns native when retry window is open, attempts < MAX, python present', async () => {
@@ -194,7 +204,18 @@ describe('resolveSearchBackend — retry-aware failed state', () => {
 });
 
 describe('bootstrapNativeSearxng — failure path', () => {
-  beforeEach(() => { resetConfig(); vi.clearAllMocks(); });
+  // These tests exercise the pip/venv failure path, not platform gating —
+  // pin to a supported platform so the win32 early-exit guard doesn't
+  // short-circuit them when run on an actual Windows machine.
+  const originalPlatform = process.platform;
+  beforeEach(() => {
+    resetConfig();
+    vi.clearAllMocks();
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  });
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
 
   it('writes failed state with attempts=1 and lastError from BootstrapError', async () => {
     vi.mocked(spawnSync).mockReturnValue({
