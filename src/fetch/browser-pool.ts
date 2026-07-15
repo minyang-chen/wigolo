@@ -345,11 +345,6 @@ export class MultiBrowserPool {
     let finalUrl = url;
     let gotoTimedOut = false;
 
-    // When an auto-passing challenge clears during the settle wait, the fresh
-    // (real) body is captured here so the post-goto path reuses it instead of
-    // re-reading the page.
-    let settledHtml: string | undefined;
-
     try {
       try {
         // Race the navigation against the caller's abort signal so the fetch
@@ -461,9 +456,9 @@ export class MultiBrowserPool {
             log.warn('bot-protection challenge did not clear within settle window, fast-failing', { url, statusCode });
             throw new ChallengeBlockedError(url);
           }
-          // Auto-passed: reuse the settled (real) body so we don't re-read it
-          // after the hydration waits below.
-          settledHtml = reChecked;
+          // Auto-passed: the challenge navigated to a real page. Fall through so
+          // the normal post-goto hydration waits run and the final content read
+          // below captures the fully-rendered page.
           log.info('bot-protection challenge auto-passed within settle window', { url });
         }
       }
@@ -515,10 +510,8 @@ export class MultiBrowserPool {
       // Client-side routers (React Router / Next.js) can fire a pushState
       // navigation during initial hydration. If page.content() runs mid-
       // transition Playwright throws "Execution context was destroyed".
-      // Retry briefly so a hydration nav doesn't fail the whole fetch. When a
-      // challenge auto-passed during settle we already captured the real body —
-      // reuse it rather than re-reading.
-      const html = settledHtml ?? await readContentWithRetry(page, url);
+      // Retry briefly so a hydration nav doesn't fail the whole fetch.
+      const html = await readContentWithRetry(page, url);
 
       let screenshotBase64: string | undefined;
       if (options.screenshot) {
