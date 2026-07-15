@@ -111,6 +111,16 @@ function poolHealthFloor(dispatchedCount: number): number {
 // Undated results on a recency-bound query are kept but demoted so dated,
 // in-window pages win the top slots without collapsing recall.
 const UNDATED_DEMOTION = 0.3;
+// Absolute pre-normalisation confidence floor for the degraded-pool
+// normalisation guard (gate d). Max-normalisation divides every score by the
+// top score, so a single-junk degraded pool's top result becomes 1.0 BY
+// CONSTRUCTION — the live-incident ~1.0 mechanism. When the pool is degraded
+// AND the top pre-normalised final is below this floor, the stretch is skipped
+// so a low-confidence junk survivor is not manufactured into a 1.0 evidence
+// score. Measured against real RRF×lexical scores: a lexically-strong survivor
+// scores ~0.3 (still stretched), a zero-lexical junk survivor ~0.006 (not
+// stretched). Healthy pools always normalise regardless of score.
+const RANK_DEGRADED_CONFIDENCE_FLOOR = 0.05;
 
 // Wrap every error/status-code token in the query in double quotes in place so
 // engines treat the code as one atom (substring matching on an unquoted code
@@ -705,9 +715,23 @@ export async function runV1Search(
   const maxResults = requestedMax;
   let results = merged.slice(0, maxResults);
 
+  // Degraded-pool signal available at normalisation time (gate d). `poolDegraded`
+  // is only set when the recovery/starvation waves fired; the primary-healthy
+  // floor catches a degraded pool that had no recovery roster to dispatch. This
+  // closes the timing gap noted in recon: the EnginePoolHealth object is
+  // otherwise finalised after normalisation runs.
+  const poolIsDegraded =
+    poolDegraded !== undefined ||
+    (outcomes.length > 0 && primaryHealthy < poolHealthFloor(outcomes.length));
+
   if (results.length > 0) {
     const maxFinal = Math.max(...results.map((r) => r.relevance_score));
-    if (maxFinal > 0) {
+    // Skip the stretch-to-1.0 on a degraded pool whose top pre-normalised score
+    // is below the confidence floor: normalising there would manufacture a ~1.0
+    // evidence score on a low-confidence junk survivor. Every other case
+    // (healthy pool, or a confident-degraded top) still normalises.
+    const skipStretch = poolIsDegraded && maxFinal < RANK_DEGRADED_CONFIDENCE_FLOOR;
+    if (maxFinal > 0 && !skipStretch) {
       results = results.map((r) => ({ ...r, relevance_score: r.relevance_score / maxFinal }));
     }
   }
