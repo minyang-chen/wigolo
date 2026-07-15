@@ -146,9 +146,14 @@ export async function probeSetupStatus(
     {
       id: 'browser',
       label: 'browser',
+      // Still required for operation, but lazily acquired: a missing browser
+      // triggers a background install on first fetch use (browser-acquire), so
+      // absence at init time is 'lazy', not a setup failure.
       required: true,
-      status: deps.browserInstalled() ? 'ok' : 'failed',
-      detail: deps.browserInstalled() ? undefined : 'browser engine not installed',
+      status: deps.browserInstalled() ? 'ok' : 'lazy',
+      detail: deps.browserInstalled()
+        ? undefined
+        : 'downloads on first use — `wigolo warmup --browser` pre-caches',
     },
     {
       id: 'agents',

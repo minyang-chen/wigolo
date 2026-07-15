@@ -177,8 +177,11 @@ describe('runInit --non-interactive', () => {
     // Honest-setup contract: when summarizeSetup reports a required component
     // failed (exitCode 1), runInitPlain must propagate that out of runInit —
     // it cannot silently return 0. Guards the failure path, not just success.
+    // Fixture uses the agents-requested-but-failed case: since wave-2 S8 a
+    // missing browser is 'lazy' (self-installs on first use) and can no longer
+    // produce this state, but a requested agent that failed to register still does.
     summarizeSetupMock.mockReturnValueOnce({
-      lines: ['Setup: 5/6 ready', '  ✗ browser — install failed'],
+      lines: ['Setup: 5/6 ready', '  ✗ agents(none) — no agent configured'],
       readyCount: 5,
       total: 6,
       requiredFailed: true,
@@ -242,7 +245,7 @@ describe('runInit --non-interactive', () => {
     // Case (d): when the classifier reports a required failure, the --json status
     // and the process exit code must both signal error — never disagree.
     summarizeSetupMock.mockReturnValueOnce({
-      lines: ['Setup: 5/6 ready', '  ✗ browser — install failed'],
+      lines: ['Setup: 5/6 ready', '  ✗ agents(none) — no agent configured'],
       readyCount: 5,
       total: 6,
       requiredFailed: true,

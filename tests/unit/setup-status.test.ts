@@ -86,11 +86,23 @@ describe('probeSetupStatus', () => {
     expect(search.label).toContain('core');
   });
 
-  it('missing browser → required browser failed', async () => {
+  it('missing browser → lazy (self-installs on first use), not a setup failure', async () => {
+    // WHY (updated for wave-2 S8): the probe must still surface a missing
+    // browser distinctly — but a missing browser now triggers a background
+    // install on first fetch use, so it renders ○ lazy with the warmup hint
+    // and must not fail setup or flip the exit code.
     const comps = await probeSetupStatus({ ...deps, browserInstalled: () => false });
     const b = comps.find(c => c.id === 'browser')!;
     expect(b.required).toBe(true);
-    expect(b.status).toBe('failed');
+    expect(b.status).toBe('lazy');
+    expect(b.detail).toMatch(/first use/);
+    expect(b.detail).toMatch(/wigolo warmup --browser/);
+    const summary = summarizeSetup(comps);
+    expect(summary.requiredFailed).toBe(false);
+    expect(summary.exitCode).toBe(0);
+    const line = summary.lines.find(l => l.includes('browser'))!;
+    expect(line).toContain('○');
+    expect(line).not.toContain('✗');
   });
 
   it('no LLM key → llm absent + optional', async () => {
@@ -175,6 +187,35 @@ describe('probeSetupStatus', () => {
     expect(embLine).not.toContain('✗');
     expect(embLine).toContain('○');
     expect(embLine).not.toContain('find_similar disabled');
+  });
+
+  // Genuinely fresh machine: no browser, no embeddings, engine-only install.
+  // Every lazily-acquired component self-installs on first use, so a bare
+  // `wigolo init --non-interactive` must succeed — exit 0, both rows ○ lazy.
+  it('fresh machine (no browser, no embeddings, engine-only) → exit 0, both ○ lazy', async () => {
+    const comps = await probeSetupStatus(
+      {
+        ...deps,
+        browserInstalled: () => false,
+        embeddingsInstalled: () => false,
+        configuredAgents: () => [],
+      },
+      { agentsRequested: false },
+    );
+    const browser = comps.find(c => c.id === 'browser')!;
+    const embeddings = comps.find(c => c.id === 'embeddings')!;
+    expect(browser.status).toBe('lazy');
+    expect(embeddings.status).toBe('lazy');
+
+    const summary = summarizeSetup(comps);
+    expect(summary.requiredFailed).toBe(false);
+    expect(summary.exitCode).toBe(0);
+    const browserLine = summary.lines.find(l => l.includes('browser'))!;
+    const embLine = summary.lines.find(l => l.includes('embeddings'))!;
+    expect(browserLine).toContain('○');
+    expect(browserLine).not.toContain('✗');
+    expect(embLine).toContain('○');
+    expect(embLine).not.toContain('✗');
   });
 });
 

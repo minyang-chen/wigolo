@@ -183,10 +183,14 @@ describe('fresh-machine setup round-trip', () => {
       expect(agents.status).toBe('skipped');
     });
 
-    it('required component failed (browser) → requiredFailed true, exit 1, status error', async () => {
+    it('genuinely fresh machine (no browser, no embeddings, engine-only) → exit 0, status ok, both ○ lazy', async () => {
+      // Wave-2 S8: the browser engine self-installs in the background on first
+      // fetch use, and the embedding model downloads on first use — so a clean
+      // machine running `wigolo init --non-interactive` must exit 0 with both
+      // components rendered as ○ lazy, never ✗ failed / exit 1.
       const { probeSetupStatus, summarizeSetup } = await import('../../src/cli/tui/actions/setup-status.js');
       const deps = {
-        browserInstalled: () => false, // genuinely broken required component
+        browserInstalled: () => false,
         searchBackend: () => 'core' as const,
         searxngReady: () => false,
         embeddingsInstalled: () => false,
@@ -198,9 +202,20 @@ describe('fresh-machine setup round-trip', () => {
       const statuses = await probeSetupStatus(deps, { agentsRequested: false });
       const summary = summarizeSetup(statuses);
 
-      expect(summary.requiredFailed).toBe(true);
-      expect(summary.exitCode).toBe(1);
-      expect(initJsonStatus(summary.exitCode)).toBe('error');
+      expect(summary.requiredFailed).toBe(false);
+      expect(summary.exitCode).toBe(0);
+      expect(initJsonStatus(summary.exitCode)).toBe('ok');
+
+      const browser = statuses.find(s => s.id === 'browser')!;
+      const embeddings = statuses.find(s => s.id === 'embeddings')!;
+      expect(browser.status).toBe('lazy');
+      expect(embeddings.status).toBe('lazy');
+      const browserLine = summary.lines.find(l => l.includes('browser'))!;
+      const embLine = summary.lines.find(l => l.includes('embeddings'))!;
+      expect(browserLine).toContain('○');
+      expect(browserLine).not.toContain('✗');
+      expect(embLine).toContain('○');
+      expect(embLine).not.toContain('✗');
     });
 
     it('agents requested but registration failed → requiredFailed true, exit 1, status error', async () => {
