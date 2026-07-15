@@ -302,15 +302,17 @@ For repeated interactive use, run `wigolo serve` so the browser pool, embeddings
 | Command | What it does |
 |---------|--------------|
 | `wigolo` / `wigolo mcp` | Start the MCP stdio server (the default command). |
+| `wigolo <tool> <args>` | Run any tool once, headlessly — `search`, `fetch`, `crawl`, `extract`, `cache`, `find-similar`, `research`, `agent`, `diff`, `watch`. Add `--json` for machine-readable output (results on stdout, logs on stderr, exit code 0/1); `--help` on each tool lists its flags. Example: `wigolo search "rust async runtimes" --limit 5 --json`. |
 | `wigolo init` | Set up wigolo headlessly: wire into detected agents, persist settings (components download on first use). `--non-interactive --agents=<csv> --provider=<name> --search=<backend>` for CI; `--warmup` to pre-cache components; `--wizard` for the interactive TUI; `--json` for a machine-readable summary. |
-| `wigolo setup mcp` | Re-write just the MCP server entries, without the full wizard. |
-| `wigolo doctor` | Cold-start health check — no network fetches. |
-| `wigolo verify` | End-to-end smoke test (fetch, crawl, extract, search, rerank, embed). |
-| `wigolo serve` | HTTP daemon — keeps subsystems warm across multiple clients. |
+| `wigolo setup mcp` | Re-write just the MCP server entries, without the full wizard (`--json`). |
+| `wigolo doctor` | Cold-start health check — no network fetches. `--fix` auto-repairs known failures (re-download missing models, install the browser engine, clear stale sidecar state, reset engine breakers — including on a running daemon); `--json` for a machine-readable report. |
+| `wigolo verify` | End-to-end smoke test (fetch, crawl, extract, search, rerank, embed) (`--json`). |
+| `wigolo serve` | HTTP daemon — keeps subsystems warm across multiple clients. A taken port fails with an actionable message naming `--port`. |
 | `wigolo shell` | Interactive REPL (`--json` for piping). |
-| `wigolo config` | Settings TUI; or headless `--set K=V`, `--export`, `--import`, `--cleanup`, `--uninstall --yes`. |
-| `wigolo status` | Plain-text status summary. |
-| `wigolo health` | Ping a running daemon's `/health`. |
+| `wigolo config` | Settings TUI; or headless `--set K=V`, `--export`, `--import`, `--cleanup`, `--uninstall --yes` (`--json` with `--plain`). |
+| `wigolo status` | Plain-text status summary (`--json`). |
+| `wigolo health` | Ping a running daemon's `/health` (`--json`; exit code = status). |
+| `wigolo warmup` | Optional pre-cache of components for CI/offline: `--all` (browser + models), `--browser`, `--embeddings`, `--reranker`, `--searxng` (opt-in search sidecar). Nothing requires warmup — everything downloads on first use. `--json` for a machine-readable result. |
 | `wigolo backfill` | Embed cached pages that have no vector yet (`--batch-size`, `--dry-run`). |
 | `wigolo plugin add\|list\|remove` | Manage custom extractor / search-engine plugins. |
 | `wigolo uninstall` | Remove wigolo from agent configs (keeps your cache). |
