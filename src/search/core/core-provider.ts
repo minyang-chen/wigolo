@@ -645,13 +645,33 @@ export class CoreSearchProvider implements SearchProvider {
       // keeps the single best result so the set is never emptied.
       const configuredThreshold = getConfig().relevanceThreshold;
       const floor = Math.max(DEFAULT_SEARCH_SCORE_FLOOR, configuredThreshold);
+      // Degraded-pool signal from the orchestrator dispatch(es): when the pool
+      // collapsed (all-but-one engine down under burst) the score-floor's top-1
+      // exemption + per-engine rescue must NOT rescue a zero-lexical survivor —
+      // the live-incident junk shape. Threaded per-result on the
+      // evidence-components lexical_alignment; a pool that is entirely
+      // zero-lexical under degradation empties, so 'no_lexical_match' is
+      // surfaced on engine_pool.reasons.
+      const poolIsDegraded = dispatches.some((d) => d.pool_degraded?.degraded === true);
+      const lexicalAlignmentOf = (r: RawSearchResult): number =>
+        r.evidence_score?.components.lexical_alignment ?? 0;
       // Per-engine keep guarantee: a dominant vertical whose pages share the
       // query's doc-phrase tokens scores high on lexical alignment and
       // monopolises the kept set, flooring out ANOTHER engine's correct-entity
       // results entirely (the kept-0 case). Rescue each engine's best result
       // when the query-wide floor would leave it with none — keeps cross-engine
       // keep like-for-like. Per-result on `engine`, one rescue per engine.
-      const floored = applyScoreFloor(processed, floor, { perEngineKeep: 1 });
+      const floored = applyScoreFloor(processed, floor, {
+        perEngineKeep: 1,
+        degraded: poolIsDegraded,
+        lexicalAlignmentOf,
+      });
+      // A degraded pool that the lexical gate emptied entirely (every survivor
+      // was zero-lexical junk) surfaces 'no_lexical_match' so callers see WHY
+      // the response is empty rather than a bare zero-result.
+      if (poolIsDegraded && floored.kept.length === 0 && processed.length > 0) {
+        poolReasons.add('no_lexical_match');
+      }
       processed = floored.kept;
 
       const maxResults = input.max_results ?? processed.length;
