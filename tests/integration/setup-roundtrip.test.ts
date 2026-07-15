@@ -144,6 +144,86 @@ describe('fresh-machine setup round-trip', () => {
     }
   });
 
+  // The init --json `status` field is derived from `summary.exitCode` and the
+  // process exit code IS `summary.exitCode` — they must agree. These cases pin
+  // that agreement against the REAL classifier (no probe/summarize mocks), for
+  // both the engine-only success path and a required-component failure path.
+  describe('json status === exit-code semantics (real classifier)', () => {
+    // Mirror init.ts's derivation exactly so a drift in either the classifier or
+    // the status→exit mapping is caught here.
+    function initJsonStatus(exitCode: 0 | 1): 'ok' | 'error' {
+      return exitCode === 0 ? 'ok' : 'error';
+    }
+
+    it('engine-only fresh dir (no agents requested) → requiredFailed false, exit 0, status ok', async () => {
+      const { probeSetupStatus, summarizeSetup } = await import('../../src/cli/tui/actions/setup-status.js');
+
+      // Fresh-data-dir probe deps: browser present (required), nothing else
+      // acquired yet (lazy), no agents configured. agentsRequested=false is the
+      // engine-only mode init derives from `--non-interactive` with no `--agents`.
+      const deps = {
+        browserInstalled: () => true,
+        searchBackend: () => 'core' as const,
+        searxngReady: () => false,
+        embeddingsInstalled: () => false,
+        rerankerInstalled: () => false,
+        llmKeyPresent: () => false,
+        configuredAgents: () => [] as string[],
+      };
+
+      const statuses = await probeSetupStatus(deps, { agentsRequested: false });
+      const summary = summarizeSetup(statuses);
+
+      expect(summary.requiredFailed).toBe(false);
+      expect(summary.exitCode).toBe(0);
+      expect(initJsonStatus(summary.exitCode)).toBe('ok');
+      // The engine-only agents row is present but neither a failure nor required.
+      const agents = statuses.find(s => s.id === 'agents')!;
+      expect(agents.required).toBe(false);
+      expect(agents.status).toBe('skipped');
+    });
+
+    it('required component failed (browser) → requiredFailed true, exit 1, status error', async () => {
+      const { probeSetupStatus, summarizeSetup } = await import('../../src/cli/tui/actions/setup-status.js');
+      const deps = {
+        browserInstalled: () => false, // genuinely broken required component
+        searchBackend: () => 'core' as const,
+        searxngReady: () => false,
+        embeddingsInstalled: () => false,
+        rerankerInstalled: () => false,
+        llmKeyPresent: () => false,
+        configuredAgents: () => [] as string[],
+      };
+
+      const statuses = await probeSetupStatus(deps, { agentsRequested: false });
+      const summary = summarizeSetup(statuses);
+
+      expect(summary.requiredFailed).toBe(true);
+      expect(summary.exitCode).toBe(1);
+      expect(initJsonStatus(summary.exitCode)).toBe('error');
+    });
+
+    it('agents requested but registration failed → requiredFailed true, exit 1, status error', async () => {
+      const { probeSetupStatus, summarizeSetup } = await import('../../src/cli/tui/actions/setup-status.js');
+      const deps = {
+        browserInstalled: () => true,
+        searchBackend: () => 'core' as const,
+        searxngReady: () => false,
+        embeddingsInstalled: () => false,
+        rerankerInstalled: () => false,
+        llmKeyPresent: () => false,
+        configuredAgents: () => [] as string[], // requested but none registered
+      };
+
+      const statuses = await probeSetupStatus(deps, { agentsRequested: true });
+      const summary = summarizeSetup(statuses);
+
+      expect(summary.requiredFailed).toBe(true);
+      expect(summary.exitCode).toBe(1);
+      expect(initJsonStatus(summary.exitCode)).toBe('error');
+    });
+  });
+
   it('resetPersistedConfig() is load-bearing: without it the probe reads a stale backend', async () => {
     // Reproduces the bug fixed in init.ts: applyHeadlessSet / save() write
     // config.json via atomicWriteJson (direct fs write) which does NOT update

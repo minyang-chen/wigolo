@@ -205,6 +205,64 @@ describe('runInit --non-interactive', () => {
     expect(runWarmupMock).not.toHaveBeenCalled();
   });
 
+  it('engine-only (no --agents) probes with agentsRequested:false; JSON status ok, exit 0', async () => {
+    // Case (a): a non-interactive install with no --agents is engine-only mode.
+    // init must tell the classifier NOT to require agents, and the honest
+    // summary (mocked ok) yields exit 0 + status "ok".
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => { writes.push(String(c)); return true; });
+    let code: number;
+    try {
+      code = await runInit(['--non-interactive', '--skip-verify', '--json']);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(code).toBe(0);
+    // The classifier was told agents were NOT requested.
+    expect(probeSetupStatusMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ agentsRequested: false }),
+    );
+    const parsed = JSON.parse(writes.join('').trim());
+    expect(parsed.status).toBe('ok');
+    expect(parsed.requiredFailed).toBe(false);
+  });
+
+  it('--agents given → probes with agentsRequested:true (guard stays active)', async () => {
+    // Case (b) at the init seam: because --agents was given, init must keep the
+    // failure guard active by passing agentsRequested:true to the classifier.
+    await runInit(['--non-interactive', '--agents=cursor', '--skip-verify']);
+    expect(probeSetupStatusMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ agentsRequested: true }),
+    );
+  });
+
+  it('json status agrees with exit code on the failure path (status error, exit 1)', async () => {
+    // Case (d): when the classifier reports a required failure, the --json status
+    // and the process exit code must both signal error — never disagree.
+    summarizeSetupMock.mockReturnValueOnce({
+      lines: ['Setup: 5/6 ready', '  ✗ browser — install failed'],
+      readyCount: 5,
+      total: 6,
+      requiredFailed: true,
+      exitCode: 1,
+    });
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => { writes.push(String(c)); return true; });
+    let code: number;
+    try {
+      code = await runInit(['--non-interactive', '--agents=cursor', '--skip-verify', '--json']);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(code).toBe(1);
+    const parsed = JSON.parse(writes.join('').trim());
+    expect(parsed.status).toBe('error');
+    // Agreement: a non-'ok' status must line up with a non-zero exit.
+    expect(parsed.status === 'ok').toBe(code === 0);
+  });
+
   it('--non-interactive with NO --agents sets up config only, no downloads (no gatekeeping)', async () => {
     // Marketing contract: wigolo works for ANY MCP-capable agent, so a user whose
     // agent has no built-in installer (e.g. Hermes) must still complete init
