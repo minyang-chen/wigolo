@@ -2,6 +2,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { getConfig } from '../config.js';
+import { searxngConfigured } from '../searxng/enabled.js';
 import { probeBrowser, type BrowserName } from '../fetch/browser-probe.js';
 import { checkPythonAvailable, bootstrapNativeSearxng, getBootstrapState } from '../searxng/bootstrap.js';
 import { checkVenvModule, venvInstallHint } from '../python-env.js';
@@ -342,14 +343,17 @@ export async function runWarmup(
 
   const pwResult = await installPlaywright(reporterImpl);
 
-  // The search engine (searxng) is an optional backend — `core` is the default
-  // search path and needs no native bootstrap. `--no-searxng` lets the
-  // Review/Toggles screen genuinely skip the searxng phase rather than only
-  // relabeling its status.
+  // D1: the search-engine sidecar is opt-in. The searxng phase runs only when
+  // explicitly requested (`--searxng`), or with `--all` when the sidecar is
+  // configured (searxng/hybrid backend or an external URL). A core-backend
+  // `--all` installs browser + models only, killing the D1↔D8 hint
+  // contradiction. `--no-searxng` is an ACTIVE suppressor and wins over both.
+  const searxngRequested =
+    flagSet.has('--searxng') || (flagSet.has('--all') && searxngConfigured(config));
   let searxngResult: Pick<WarmupResult, 'searxng' | 'searxngError'>;
-  if (flagSet.has('--no-searxng')) {
+  if (flagSet.has('--no-searxng') || !searxngRequested) {
     searxngResult = { searxng: 'skipped' };
-    reporterImpl.note('Search engine (searxng): skipped — using core backend');
+    reporterImpl.note('Search engine sidecar: skipped — using multi-engine core backend');
   } else {
     searxngResult = await runSearxngPhase(config.dataDir, reporterImpl);
   }
