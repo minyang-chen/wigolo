@@ -1,6 +1,7 @@
 import type { RawSearchResult, EvidenceScore } from '../../types.js';
 import { getRerankProvider } from '../../providers/rerank-provider.js';
 import { detectRareTerms, isRareTermMiss } from './rare-terms.js';
+import { lexicalAlignment } from './lexical-alignment.js';
 import { createLogger } from '../../logger.js';
 
 const log = createLogger('search');
@@ -155,13 +156,36 @@ export async function foldRerankIntoOrdering(
   });
   const queryHasCompound = rareCompoundPerQuery.some((r) => r.compoundTokens.length > 0);
 
+  // Lexical gate (gate a): force tier-0 for a result with ZERO lexical overlap
+  // against every query variant AND single-engine consensus (seen by exactly
+  // one engine). Zero overlap with a single-engine consensus is the live-
+  // incident junk shape (a degraded pool's lone survivor returns an off-topic
+  // page sharing NO query token). The consensus conjunct protects a healthy
+  // multi-engine zero-lexical (synonym/paraphrase) result, which several
+  // engines agreeing on is trustworthy. Inert on empty/stopword-only queries:
+  // when NO variant carries a content token, lexicalAlignment is 0 for every
+  // result by construction, so the gate would demote everything — we skip it.
+  const queryHasContentToken = queries.some(
+    (q) => lexicalAlignment(q, q, '') > 0,
+  );
+
   const scored = windowResults.map((res, i) => {
     const logitTier = logits[i] > RERANK_RELEVANCE_THRESHOLD + RERANK_TIER_MARGIN ? 1 : 0;
     // Guarded to tier-0 only when the query carries a compound token AND this
     // result matches NONE of them across every query variant (a true miss).
     const rareMiss =
       queryHasCompound && rareCompoundPerQuery.every((r) => isRareTermMiss(res, r));
-    const tier = rareMiss ? 0 : logitTier;
+    // Zero lexical overlap against ALL query variants -> lexicalMiss. Max over
+    // variants: a result aligned with ANY variant is not a miss.
+    const maxLexical = queryHasContentToken
+      ? Math.max(...queries.map((q) => lexicalAlignment(q, res.title, res.snippet)))
+      : 1;
+    // engine_consensus is only trustworthy when the evidence components carry
+    // it; without it the gate fails open (cannot assert single-engine).
+    const consensus = res.evidence_score?.components.engine_consensus;
+    const singleEngine = consensus === 1;
+    const lexicalMiss = queryHasContentToken && maxLexical === 0 && singleEngine;
+    const tier = rareMiss || lexicalMiss ? 0 : logitTier;
     const nr = normRerank(logits[i]);
     const blend =
       RERANK_BLEND_COMPOSITE * normComposite(res.relevance_score) +

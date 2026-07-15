@@ -216,6 +216,151 @@ describe('foldRerankIntoOrdering — junk-floor guard (no-shared-rare-term)', ()
 // guard replaces the stretch with a neutral 0.5 blend so junk batches stop
 // being stretched apart. Tier assignment from RAW logits is unchanged — this
 // only touches the intra-tier blend value.
+// Lexical gate (gate a): a result with ZERO lexical overlap with the query AND
+// single-engine consensus (seen by exactly one engine) is forced to tier-0 —
+// it cannot ride a gamed cross-encoder logit into the confidently-relevant
+// band. The consensus conjunct is deliberate: a healthy multi-engine
+// zero-lexical result (a synonym/paraphrase match several engines agree on) is
+// NOT demoted. Gate is inert on empty / stopword-only queries.
+describe('foldRerankIntoOrdering — lexical gate (zero-overlap single-engine junk)', () => {
+  // Result carrying an explicit engine_consensus so the gate can read it. la is
+  // recomputed inside the fold from the query+title+snippet, so fixture text
+  // controls the lexical-alignment signal directly.
+  // fakeRerank keys on the TITLE (rerankInputText puts title on the first
+  // line), so fixtures carry distinct one-word title heads and key the logit
+  // map on that head. rc() sets a zero lexical_alignment component (unused by
+  // the gate — la is recomputed live — but present for shape realism) and an
+  // explicit engine_consensus the gate reads.
+  function rc(
+    url: string,
+    score: number,
+    title: string,
+    snippet: string,
+    engine_consensus: number,
+  ): RawSearchResult {
+    return {
+      title, url, snippet, engine: 'test', relevance_score: score,
+      evidence_score: {
+        final: score,
+        components: {
+          base_rrf: score, context_cosine: 0, domain_quality: 1,
+          lexical_alignment: 0, recency_boost: 1, engine_consensus,
+        },
+        explanation: 'base',
+      },
+    };
+  }
+  function byTitleHead(logits: Record<string, number>) {
+    return async (_q: string, cands: { id: string; text: string }[]) => {
+      const m = new Map<string, number>();
+      for (const c of cands) {
+        const head = c.text.split('\n')[0].split(/\s+/)[0];
+        m.set(c.id, logits[head] ?? 0);
+      }
+      return m;
+    };
+  }
+
+  it('POSITIVE: a zero-lexical single-engine result cannot ride a high logit into tier-1', async () => {
+    // The live-incident shape: an English tech query, a survivor engine returns
+    // ONE off-topic result (a driving-school page) with ZERO shared query
+    // tokens, seen by exactly one engine, handed a high (gamed) logit.
+    const results = [
+      rc('https://on.example/a', 0.5, 'kubernetes ingress controller setup', 'configure kubernetes ingress', 1),
+      rc('https://junk.example/jp', 0.5, 'driving school reservation', 'lessons and pricing', 1),
+    ];
+    const out = await foldRerankIntoOrdering(results, {
+      queries: ['kubernetes ingress'],
+      rerank: byTitleHead({ kubernetes: 4, driving: 9 }),
+    });
+    const junk = out.find((x) => x.url === 'https://junk.example/jp')!;
+    expect(junk.relevance_score).toBeLessThan(0.5); // forced tier-0
+    const hit = out.find((x) => x.url === 'https://on.example/a')!;
+    expect(hit.relevance_score).toBeGreaterThanOrEqual(0.5);
+    expect(out[0].url).toBe('https://on.example/a');
+  });
+
+  it('NEGATIVE: a zero-lexical result seen by MULTIPLE engines is NOT demoted (paraphrase case)', async () => {
+    // The k8s/Kubernetes synonym case: a result whose surface text shares no
+    // literal query token but several engines agree on (engine_consensus > 1).
+    // The cross-encoder rightly promotes it and the gate must NOT fire.
+    const results = [
+      rc('https://para.example/syn', 0.5, 'container orchestration platform', 'manage clusters at scale', 3),
+      rc('https://other.example/b', 0.5, 'kubernetes docs reference', 'k8s reference', 1),
+    ];
+    const out = await foldRerankIntoOrdering(results, {
+      queries: ['kubernetes'],
+      rerank: byTitleHead({ container: 6, kubernetes: 1 }),
+    });
+    // Multi-engine zero-lexical result keeps its cross-encoder promotion.
+    const para = out.find((x) => x.url === 'https://para.example/syn')!;
+    expect(para.relevance_score).toBeGreaterThanOrEqual(0.5);
+    expect(out[0].url).toBe('https://para.example/syn');
+  });
+
+  it('NEGATIVE: a single-engine result WITH lexical overlap is NOT demoted', async () => {
+    // Shares a query token ("kubernetes") — not zero-lexical, so the gate is
+    // inert regardless of consensus.
+    const results = [
+      rc('https://hit.example/a', 0.5, 'kubernetes networking guide', 'kubernetes cni', 1),
+      rc('https://low.example/b', 0.5, 'unrelated storage topic', 'volumes', 1),
+    ];
+    const out = await foldRerankIntoOrdering(results, {
+      queries: ['kubernetes'],
+      rerank: byTitleHead({ kubernetes: 5, unrelated: -3 }),
+    });
+    const hit = out.find((x) => x.url === 'https://hit.example/a')!;
+    expect(hit.relevance_score).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it('NEGATIVE: an empty query leaves the gate inert (fold short-circuits)', async () => {
+    // No content tokens in the query -> the fold short-circuits empty queries,
+    // so results are returned unchanged and nothing is demoted.
+    const results = [
+      rc('https://a.example/1', 0.5, 'anything here', 'body', 1),
+      rc('https://b.example/2', 0.5, 'other text', 'body', 1),
+    ];
+    const out = await foldRerankIntoOrdering(results, {
+      queries: [''],
+      rerank: byTitleHead({ anything: 5, other: 1 }),
+    });
+    const a = out.find((x) => x.url === 'https://a.example/1')!;
+    expect(a.relevance_score).toBe(0.5); // unchanged, fold short-circuits empty queries
+  });
+
+  it('NEGATIVE: a stopword-only query leaves the gate inert', async () => {
+    // Query is all stopwords -> zero content tokens -> lexicalAlignment 0 for
+    // all. The gate must not fire; the high-logit result still reaches tier-1.
+    const results = [
+      rc('https://a.example/1', 0.5, 'kubernetes ingress', 'setup', 1),
+      rc('https://b.example/2', 0.5, 'other content topic', 'body', 1),
+    ];
+    const out = await foldRerankIntoOrdering(results, {
+      queries: ['the what is of'],
+      rerank: byTitleHead({ kubernetes: 5, other: -3 }),
+    });
+    const a = out.find((x) => x.url === 'https://a.example/1')!;
+    expect(a.relevance_score).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it('NEGATIVE: a zero-lexical single-engine result with NO evidence_score is NOT gated (fail-open)', async () => {
+    // Consensus is unknown without evidence_score, so the gate must fail open:
+    // it cannot assert single-engine consensus, so it does not demote.
+    const results = [
+      { title: 'driving school lessons', url: 'https://j.example/x', snippet: 'lessons', engine: 'test', relevance_score: 0.5 },
+      { title: 'kubernetes ingress setup', url: 'https://k.example/y', snippet: 'setup', engine: 'test', relevance_score: 0.5 },
+    ] as RawSearchResult[];
+    const out = await foldRerankIntoOrdering(results, {
+      queries: ['kubernetes ingress'],
+      rerank: byTitleHead({ driving: 5, kubernetes: 1 }),
+    });
+    // No evidence_score -> gate inert -> the high-logit (junk) result rides its
+    // logit as it did before this gate existed.
+    const junk = out.find((x) => x.url === 'https://j.example/x')!;
+    expect(junk.relevance_score).toBeGreaterThanOrEqual(0.5);
+  });
+});
+
 describe('foldRerankIntoOrdering — blend-inflation guard (all-below-calibration batch)', () => {
   it('an all-negative-logit batch is NOT stretched: no result gets a normalised rerank of 1.0', async () => {
     // Every logit is confidently-negative (junk). Old min-max would map the
@@ -308,18 +453,25 @@ describe('foldRerankIntoOrdering', () => {
   });
 
   it('uses max logit across queries — A relevant to q1, B to q2, both outrank always-negative C', async () => {
-    const results = [r('A', 0.9), r('B', 0.1), r('C', 0.5)];
+    // Titles carry a query token ("topic") so the lexical gate is inert and
+    // this test isolates the max-logit-across-queries hedge. rerank keys on the
+    // title's SECOND token (the discriminating A/B/C word).
+    const results = [
+      r('A', 0.9, 'topic alpha'),
+      r('B', 0.1, 'topic beta'),
+      r('C', 0.5, 'topic gamma'),
+    ];
     const rerank = async (q: string, cands: { id: string; text: string }[]) => {
       const m = new Map<string, number>();
       for (const c of cands) {
-        const url = c.text.split('\n')[0];
-        if (url === 'C') m.set(c.id, -3);
-        else if (q === 'q1') m.set(c.id, url === 'A' ? 3 : -3);
-        else m.set(c.id, url === 'B' ? 3 : -3);
+        const word = c.text.split('\n')[0].split(/\s+/)[1];
+        if (word === 'gamma') m.set(c.id, -3);
+        else if (q === 'q1 topic') m.set(c.id, word === 'alpha' ? 3 : -3);
+        else m.set(c.id, word === 'beta' ? 3 : -3);
       }
       return m;
     };
-    const out = await foldRerankIntoOrdering(results, { queries: ['q1', 'q2'], rerank });
+    const out = await foldRerankIntoOrdering(results, { queries: ['q1 topic', 'q2 topic'], rerank });
     // A (relevant to q1) and B (relevant to q2) both keep tier-1 via max-over-queries;
     // C is negative for every query so it falls to tier-0 and sorts last. A
     // queries[0]-only impl would push B below C.
