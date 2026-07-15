@@ -715,22 +715,33 @@ export async function runV1Search(
   const maxResults = requestedMax;
   let results = merged.slice(0, maxResults);
 
-  // Degraded-pool signal available at normalisation time (gate d). `poolDegraded`
-  // is only set when the recovery/starvation waves fired; the primary-healthy
-  // floor catches a degraded pool that had no recovery roster to dispatch. This
-  // closes the timing gap noted in recon: the EnginePoolHealth object is
-  // otherwise finalised after normalisation runs.
-  const poolIsDegraded =
-    poolDegraded !== undefined ||
-    (outcomes.length > 0 && primaryHealthy < poolHealthFloor(outcomes.length));
-
+  // Pool COLLAPSE signal (distinct from a benign starvation backfill):
+  // the primary wave left fewer than half the dispatched engines healthy — the
+  // burst-collapse shape of the live incident, where the pool fell to one
+  // degraded survivor. This is the ONLY degradation that triggers the
+  // downstream zero-lexical junk-floor gates; a thin-vertical starvation
+  // re-dispatch (which recovered genuine recall) must NOT. Surfaced as a
+  // dedicated reason so the core-provider floor can gate on it precisely.
+  const poolCollapsed =
+    outcomes.length > 0 && primaryHealthy < poolHealthFloor(outcomes.length);
+  if (poolCollapsed) {
+    const reasons = poolDegraded?.reasons ?? [];
+    poolDegraded = {
+      healthy: poolDegraded?.healthy ?? primaryHealthy,
+      total: poolDegraded?.total ?? outcomes.length,
+      degraded: true,
+      reasons: reasons.includes('pool_collapsed') ? reasons : [...reasons, 'pool_collapsed'],
+    };
+  }
   if (results.length > 0) {
     const maxFinal = Math.max(...results.map((r) => r.relevance_score));
-    // Skip the stretch-to-1.0 on a degraded pool whose top pre-normalised score
-    // is below the confidence floor: normalising there would manufacture a ~1.0
-    // evidence score on a low-confidence junk survivor. Every other case
-    // (healthy pool, or a confident-degraded top) still normalises.
-    const skipStretch = poolIsDegraded && maxFinal < RANK_DEGRADED_CONFIDENCE_FLOOR;
+    // Skip the stretch-to-1.0 only on a COLLAPSED pool whose top pre-normalised
+    // score is below the confidence floor: normalising there would manufacture a
+    // ~1.0 evidence score on a low-confidence junk survivor (the live incident).
+    // A benign starvation-redispatch degrade still normalises — it recovered
+    // real recall and its results must not be starved below the score floor. A
+    // healthy pool, or a confident-collapsed top, also still normalises.
+    const skipStretch = poolCollapsed && maxFinal < RANK_DEGRADED_CONFIDENCE_FLOOR;
     if (maxFinal > 0 && !skipStretch) {
       results = results.map((r) => ({ ...r, relevance_score: r.relevance_score / maxFinal }));
     }

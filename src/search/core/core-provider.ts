@@ -645,14 +645,17 @@ export class CoreSearchProvider implements SearchProvider {
       // keeps the single best result so the set is never emptied.
       const configuredThreshold = getConfig().relevanceThreshold;
       const floor = Math.max(DEFAULT_SEARCH_SCORE_FLOOR, configuredThreshold);
-      // Degraded-pool signal from the orchestrator dispatch(es): when the pool
-      // collapsed (all-but-one engine down under burst) the score-floor's top-1
-      // exemption + per-engine rescue must NOT rescue a zero-lexical survivor —
-      // the live-incident junk shape. Threaded per-result on the
-      // evidence-components lexical_alignment; a pool that is entirely
-      // zero-lexical under degradation empties, so 'no_lexical_match' is
-      // surfaced on engine_pool.reasons.
-      const poolIsDegraded = dispatches.some((d) => d.pool_degraded?.degraded === true);
+      // Pool-COLLAPSE signal from the orchestrator dispatch(es): only a genuine
+      // health collapse (all-but-one engine down under burst — the 'pool_collapsed'
+      // reason) triggers the score-floor's zero-lexical junk-floor gates. A benign
+      // starvation-redispatch degrade (which recovered real recall) is
+      // deliberately excluded, so it is NOT emptied. The gate withdraws the
+      // top-1 exemption + per-engine rescue from a zero-lexical survivor
+      // (per-result on the evidence-components lexical_alignment); a collapsed
+      // pool that is entirely zero-lexical empties and surfaces 'no_lexical_match'.
+      const poolIsDegraded = dispatches.some((d) =>
+        d.pool_degraded?.reasons?.includes('pool_collapsed'),
+      );
       const lexicalAlignmentOf = (r: RawSearchResult): number =>
         r.evidence_score?.components.lexical_alignment ?? 0;
       // Per-engine keep guarantee: a dominant vertical whose pages share the
