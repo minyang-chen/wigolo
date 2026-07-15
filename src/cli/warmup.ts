@@ -331,7 +331,10 @@ export async function runWarmup(
   reporter?: WarmupReporter,
 ): Promise<WarmupResult> {
   const flagSet = new Set(flags);
-  const plain = flagSet.has('--plain');
+  const json = flagSet.has('--json');
+  // --json implies plain: a TUI progress reporter would emit ANSI to stderr;
+  // the machine result goes to stdout at the end, logs stay plain on stderr.
+  const plain = flagSet.has('--plain') || json;
   const reporterImpl = reporter ?? autoReporter({ plain });
 
   const config = getConfig();
@@ -411,5 +414,11 @@ export async function runWarmup(
   }
 
   reporterImpl.finish();
+
+  if (json) {
+    // Machine shape on stdout; the progress/summary lines stay on stderr.
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  }
+
   return result;
 }

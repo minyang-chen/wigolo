@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../../../src/cli/tui/run-command.js', () => ({
   runCommand: vi.fn(),
@@ -356,6 +356,46 @@ describe('runWarmup with flags', () => {
     expect(result.playwright).toBe('ok');
   });
 
+});
+
+describe('warmup --json (S9)', () => {
+  // WHY (D8): warmup already returns a structured WarmupResult; --json
+  // serializes it to stdout so a CI/agent can machine-read the outcome while
+  // the progress lines stay on stderr.
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutBuf = '';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(runCommand).mockResolvedValue(ok);
+    vi.mocked(getConfig).mockReturnValue(coreConfig as never);
+    vi.mocked(getBootstrapState).mockReturnValue({ status: 'ready', searxngPath: '/tmp/searxng' });
+    vi.mocked(existsSync).mockReturnValue(true);
+    stdoutBuf = '';
+    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutBuf += String(chunk);
+      return true;
+    });
+  });
+
+  afterEach(() => {
+    stdoutSpy.mockRestore();
+  });
+
+  it('emits the WarmupResult as a single JSON object on stdout', async () => {
+    const result = await runWarmup(['--json']);
+    const parsed = JSON.parse(stdoutBuf);
+    expect(parsed.playwright).toBe(result.playwright);
+    expect(parsed.searxng).toBe(result.searxng);
+    expect(parsed).toHaveProperty('playwright');
+    expect(parsed).toHaveProperty('searxng');
+  });
+
+  it('still returns the structured WarmupResult from the function', async () => {
+    const result = await runWarmup(['--json']);
+    expect(result.playwright).toBe('ok');
+    expect(result.searxng).toBe('skipped');
+  });
 });
 
 describe('exported repair functions (S9 — reused by doctor --fix)', () => {
