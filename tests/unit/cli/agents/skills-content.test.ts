@@ -7,7 +7,7 @@ const SKILLS_DIR = join(REPO_ROOT, 'skills');
 const BLOCKS_DIR = join(REPO_ROOT, 'assets', 'blocks');
 const LEGACY_HASHES = join(REPO_ROOT, 'assets', 'legacy-skill-hashes.json');
 
-// The 10 canonical packs — one per MCP tool plus the umbrella hub.
+// The 11 canonical packs — one per MCP tool plus the umbrella hub.
 const EXPECTED_PACKS = [
   'wigolo',
   'wigolo-search',
