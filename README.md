@@ -161,6 +161,143 @@ docker compose -f packaging/compose.serve.yml up
 
 **Bind-mount caveat.** The container runs as an unprivileged user (uid/gid `1000`). A named volume (as above) just works. If you bind-mount a host directory instead (`-v "$PWD/wigolo-data:/data"`), that directory must be writable by uid `1000` or the container hits `EACCES` — either `chown 1000:1000` the host path first, or prefer the named volume.
 
+## REST API & self-host
+
+`wigolo serve` exposes a plain-JSON **REST API** alongside the MCP transport. Same process, same tools, two surfaces:
+
+- **REST** at `POST /v1/{tool}` — curl-able, no MCP client needed. Request body is the tool's input; the response is the tool's output as plain JSON.
+- **MCP** at `/mcp` (StreamableHTTP) and `/sse` — unchanged, for MCP clients.
+- **OpenAPI 3.1** at `GET /openapi.json` — the machine-readable contract.
+- **Discovery** at `GET /v1/tools` — `[{name, description, endpoint}]`.
+- **Health** at `GET /health` — always open, no auth.
+
+Start it on the default loopback address:
+
+```bash
+wigolo serve                       # 127.0.0.1:3333
+```
+
+### curl quickstart
+
+All ten tools, against a local instance. Request bodies match each tool's input schema (the same schema MCP serves and OpenAPI publishes):
+
+```bash
+BASE=http://127.0.0.1:3333/v1
+
+# search — multi-engine web search with ranked evidence
+curl -sX POST $BASE/search   -H 'Content-Type: application/json' \
+  -d '{"query":"local-first software","max_results":5}'
+
+# fetch — one URL to clean markdown + metadata
+curl -sX POST $BASE/fetch    -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com"}'
+
+# crawl — multi-page crawl (bfs / dfs / sitemap / map)
+curl -sX POST $BASE/crawl    -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com","strategy":"map","max_pages":20}'
+
+# cache — query everything already seen (or stats / clear)
+curl -sX POST $BASE/cache    -H 'Content-Type: application/json' \
+  -d '{"query":"local first"}'
+
+# extract — structured data (tables, metadata, JSON-LD, schema, brand)
+curl -sX POST $BASE/extract  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com","mode":"structured"}'
+
+# find_similar — related pages by URL or concept
+curl -sX POST $BASE/find_similar -H 'Content-Type: application/json' \
+  -d '{"concept":"local-first search engines","include_web":true}'
+
+# research — multi-step research brief
+curl -sX POST $BASE/research -H 'Content-Type: application/json' \
+  -d '{"question":"what is local-first software","depth":"quick"}'
+
+# agent — autonomous data gathering
+curl -sX POST $BASE/agent    -H 'Content-Type: application/json' \
+  -d '{"prompt":"summarize this page","urls":["https://example.com"],"max_pages":1}'
+
+# diff — compare two content snapshots
+curl -sX POST $BASE/diff     -H 'Content-Type: application/json' \
+  -d '{"old":{"markdown":"a\nb"},"new":{"markdown":"a\nc"},"output":"summary"}'
+
+# watch — register / list / check change-detection jobs
+curl -sX POST $BASE/watch    -H 'Content-Type: application/json' \
+  -d '{"action":"list"}'
+```
+
+The OpenAPI document lists every request field and the documented top-level response fields:
+
+```bash
+curl -s http://127.0.0.1:3333/openapi.json
+```
+
+### Authentication
+
+Auth is **optional on loopback, fail-closed off it**:
+
+- **Loopback bind, no token (default):** the API is open to local callers — a browser-`Origin` request is still refused, and only loopback `Host` headers are accepted.
+- **Non-loopback bind:** the server **refuses to start** unless you set an API token or explicitly opt into open access. This is the guard that keeps a `--host 0.0.0.0` deployment from being wide open by accident.
+- **Token set:** send `Authorization: Bearer <token>` on `/v1/*`, `/openapi.json`, the shim, and the MCP transport routes (`/mcp`, `/sse`). `/health` stays open.
+
+Set the token by env var, or via a file (the standard Docker/systemd secret pattern — keeps it out of the process environment):
+
+```bash
+export WIGOLO_API_TOKEN="a-long-random-secret"
+# or, file-based:
+export WIGOLO_API_TOKEN_FILE=/run/secrets/wigolo_token
+
+wigolo serve --host 0.0.0.0        # now requires the bearer token
+
+curl -sX POST http://your-host:3333/v1/fetch \
+  -H "Authorization: Bearer $WIGOLO_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com"}'
+```
+
+To bind to a public interface **without** a token (e.g. behind your own auth proxy), opt in explicitly with `--allow-unauthenticated` (or `WIGOLO_SERVE_ALLOW_UNAUTHENTICATED=1`).
+
+### Resource limits
+
+Serve mode adds transport-level bounds on top of each tool's own defaults (MCP behaviour is unchanged). Override via env var:
+
+| Env var | Default | What it bounds |
+|---------|---------|----------------|
+| `WIGOLO_SERVE_MAX_BODY_BYTES` | 1 MiB (5 MiB for `diff` / `extract`) | Request body size → `413` on overflow |
+| `WIGOLO_SERVE_TIMEOUT_SCALE` | `1` | Multiplier on per-route deadlines (60s search/cache/diff/find_similar, 120s fetch/extract/watch, 300s crawl/research/agent) → `504` when exceeded |
+| `WIGOLO_SERVE_MAX_CONCURRENCY` | `16` | In-flight `/v1` + shim requests → `429` when saturated |
+| `WIGOLO_SERVE_ALLOW_LOCAL_TARGETS` | unset | Set to `1` to allow loopback/localhost **target URLs** under a non-loopback bind (blocked by default so a remote caller can't probe the box's own services) |
+
+Server-side parameter clamps (also published in OpenAPI so a generated SDK can't emit a rejected request): `crawl.max_pages` ≤ 200, `crawl.max_depth` ≤ 5, `agent.max_time_ms` ≤ 240000, `search` query array ≤ 10. An explicit over-cap value returns `400` with the cap in the hint.
+
+### Self-host in one command
+
+Docker (the API token makes a public bind safe; the volume persists cache, models, browser engine, and keys):
+
+```bash
+docker run -p 3333:3333 -v wigolo-data:/data \
+  -e WIGOLO_API_TOKEN="a-long-random-secret" \
+  ghcr.io/knockoutez/wigolo serve --host 0.0.0.0
+```
+
+Or use the [`packaging/compose.serve.yml`](packaging/compose.serve.yml) snippet (uncomment the token line before binding beyond loopback). Native:
+
+```bash
+WIGOLO_API_TOKEN="a-long-random-secret" wigolo serve --host 0.0.0.0
+```
+
+> **Token exposure note.** An env-var token is visible via `docker inspect` and `/proc/<pid>/environ` on the host. For hardened deployments use `WIGOLO_API_TOKEN_FILE` and mount the secret as a file (Docker/Kubernetes secrets, systemd `LoadCredential`) so it never enters the process environment.
+
+### Firecrawl-compat shim (experimental)
+
+An **experimental**, flag-gated shim mounts a lite subset of the Firecrawl v1 surface so a Firecrawl SDK can point its base URL at wigolo. Off by default; enable with `WIGOLO_FIRECRAWL_COMPAT=1`. It mounts at `/compat/firecrawl/v1` and covers **`scrape`, `search`, `map`, and `crawl`** only — batch, alternate formats (screenshot / changeTracking / rawHtml), the v2 surface, and webhooks are deliberately not implemented. Auth, limits, and target guarding apply identically to the shim.
+
+```bash
+WIGOLO_FIRECRAWL_COMPAT=1 wigolo serve
+curl -sX POST http://127.0.0.1:3333/compat/firecrawl/v1/scrape \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com"}'
+```
+
 ## Install channels
 
 wigolo ships on five channels. **npm is the primary channel and works today** (`npx wigolo …` — the Quickstart above). The other four are packaging for release: their published artifacts (the `install.sh` URL, the Homebrew tap, and the container registries) go live **at first release** — see [`packaging/RELEASE-RUNBOOK.md`](packaging/RELEASE-RUNBOOK.md).
@@ -592,6 +729,8 @@ Grab wigolo wherever you manage packages or MCP servers:
 Bug reports, feature requests, and PRs are all welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. Keep tool handlers thin (business logic lives in the domain modules), add tests, and run the suite before opening a PR. wigolo also has a plugin system for custom extractors and search engines: `wigolo plugin add <git-url>`.
 
 The single-file binary channel (`npm run build:binary`) uses two build-only devDependencies — `@yao-pkg/pkg` (packages the CJS bundle into a standalone executable) and `esbuild` (bundles the dist to CommonJS). They are needed only for that build; the npm package and all runtime tools do not depend on them.
+
+The REST API validates request bodies against the tool schemas with `ajv` (a runtime dependency, dynamically imported only when the REST surface is first hit — it never loads in stdio MCP mode). The OpenAPI document is checked against the 3.1 meta-schema in tests via the `@seriousme/openapi-schema-validator` devDependency (dev-only).
 
 ## License
 
