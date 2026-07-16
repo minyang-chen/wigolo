@@ -14,6 +14,8 @@ const {
   runConfigMock,
   wasUninstalledMock,
   saveInitConfigMock,
+  installSkillsMock,
+  readInitConfigMock,
 } = vi.hoisted(() => ({
   runSystemCheckMock: vi.fn(),
   renderBannerMock: vi.fn(() => 'BANNER\n'),
@@ -28,6 +30,8 @@ const {
   runConfigMock: vi.fn(),
   wasUninstalledMock: vi.fn(() => false),
   saveInitConfigMock: vi.fn(),
+  installSkillsMock: vi.fn(() => ({ written: [], removed: [], refused: [], notices: [] })),
+  readInitConfigMock: vi.fn(() => ({})),
 }));
 
 vi.mock('../../../src/cli/tui/system-check.js', () => ({
@@ -63,7 +67,12 @@ vi.mock('../../../src/config.js', () => ({
 }));
 vi.mock('../../../src/cli/tui/utils/config-writer.js', () => ({
   saveInitConfig: saveInitConfigMock,
-  readInitConfig: vi.fn(() => ({})),
+  readInitConfig: readInitConfigMock,
+}));
+vi.mock('../../../src/cli/agents/skills/index.js', () => ({
+  installSkills: installSkillsMock,
+  removeAllSkills: vi.fn(),
+  SUPPORTED_AGENTS: ['claude-code', 'codex', 'cursor', 'gemini-cli', 'cline', 'windsurf'],
 }));
 vi.mock('../../../src/cli/tui/actions/setup-status.js', () => ({
   probeSetupStatus: probeSetupStatusMock,
@@ -134,6 +143,8 @@ describe('runInit', () => {
     vi.clearAllMocks();
     renderBannerMock.mockReturnValue('BANNER\n');
     getPackageVersionMock.mockReturnValue('0.6.3');
+    installSkillsMock.mockReturnValue({ written: [], removed: [], refused: [], notices: [] });
+    readInitConfigMock.mockReturnValue({});
     probeSetupStatusMock.mockResolvedValue([]);
     summarizeSetupMock.mockReturnValue({
       lines: ['Setup: 6/6 ready'],
@@ -698,6 +709,49 @@ describe('runInit', () => {
       } finally {
         cap.restore();
       }
+    });
+
+    it('installs skills for the wizard-selected agents read back from init-config', async () => {
+      // The wizard's finish step persists configuredAgents; runInit's wizard
+      // branch reads them back after the Ink shell unmounts and drives the SAME
+      // shared engine call the plain path uses.
+      readInitConfigMock.mockReturnValue({ configuredAgents: ['claude-code', 'cursor'] });
+      const cap = capture();
+      try {
+        const code = await runInit(['--wizard']);
+        expect(code).toBe(0);
+      } finally {
+        cap.restore();
+      }
+      expect(installSkillsMock).toHaveBeenCalledTimes(1);
+      const arg = installSkillsMock.mock.calls[0]?.[0] as { scope: string; agents: string[] };
+      expect(arg.scope).toBe('global');
+      expect(arg.agents.sort()).toEqual(['claude-code', 'cursor']);
+    });
+
+    it('does NOT install skills after an in-wizard uninstall', async () => {
+      // wasUninstalled short-circuits BEFORE the skills step, so an intentional
+      // uninstall is never undone by a skills reinstall.
+      wasUninstalledMock.mockReturnValue(true);
+      readInitConfigMock.mockReturnValue({ configuredAgents: ['claude-code'] });
+      const cap = capture();
+      try {
+        await runInit(['--wizard']);
+      } finally {
+        cap.restore();
+      }
+      expect(installSkillsMock).not.toHaveBeenCalled();
+    });
+
+    it('installs no skills when the wizard selected no skills-capable agents', async () => {
+      readInitConfigMock.mockReturnValue({ configuredAgents: ['vscode', 'zed'] });
+      const cap = capture();
+      try {
+        await runInit(['--wizard']);
+      } finally {
+        cap.restore();
+      }
+      expect(installSkillsMock).not.toHaveBeenCalled();
     });
   });
 });

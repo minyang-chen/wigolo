@@ -18,6 +18,13 @@ vi.mock('../../../src/cli/agents/registry.js', () => ({
   detectInstalledHandlers: vi.fn(() => []),
 }));
 
+const { removeAllSkillsMock } = vi.hoisted(() => ({
+  removeAllSkillsMock: vi.fn(() => ({ written: [], removed: [], refused: [], notices: [] })),
+}));
+vi.mock('../../../src/cli/agents/skills/index.js', () => ({
+  removeAllSkills: removeAllSkillsMock,
+}));
+
 let dataDir: string;
 
 vi.mock('../../../src/config.js', () => ({
@@ -36,6 +43,7 @@ beforeEach(() => {
   vi.mocked(detectInstalledHandlers).mockReturnValue([]);
   vi.clearAllMocks();
   vi.mocked(detectInstalledHandlers).mockReturnValue([]);
+  removeAllSkillsMock.mockReturnValue({ written: [], removed: [], refused: [], notices: [] });
 });
 
 afterEach(() => {
@@ -119,6 +127,37 @@ describe('runUninstall cleanup guidance', () => {
     }
     const out = cap.stdout.join('') + cap.stderr.join('');
     expect(out).toContain('install.sh --uninstall');
+  });
+
+  it('runs the skills sweep even when NO agent handlers are detected (before the early return)', async () => {
+    // The no-handlers early return must NOT skip the receipt-driven skills
+    // sweep: skill packs can persist even when no agent binary is present.
+    vi.mocked(detectInstalledHandlers).mockReturnValue([]);
+    const cap = captureOutput();
+    try {
+      await runUninstall([]);
+    } finally {
+      cap.restore();
+    }
+    expect(removeAllSkillsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports removed/left skill counts in the output', async () => {
+    removeAllSkillsMock.mockReturnValue({
+      written: [],
+      removed: ['/h/.claude/skills/wigolo/SKILL.md', '/h/.claude/skills/wigolo-search/SKILL.md'],
+      refused: [{ path: '/h/.claude/skills/wigolo-fetch/SKILL.md' } as never],
+      notices: [],
+    });
+    const cap = captureOutput();
+    try {
+      await runUninstall([]);
+    } finally {
+      cap.restore();
+    }
+    const out = cap.stdout.join('') + cap.stderr.join('');
+    expect(out).toContain('2 removed');
+    expect(out).toContain('1 left');
   });
 
   it('--help documents the bootstrap layout distinction', async () => {
