@@ -53,6 +53,27 @@ const CRAWL_MAX_PAGES = CLAMP_TABLE.find((c) => c.tool === 'crawl' && c.field ==
 const JOB_COUNT_CAP = 100;
 const JOB_TTL_MS = 30 * 60 * 1000; // completed/failed jobs expire after 30 min
 
+/** Concurrent RUNNING crawl-jobs cap. The job-store caps bound STORAGE only —
+ * without this, rapid crawl POSTs would launch unbounded concurrent background
+ * crawls (each up to the max_pages clamp). Over-cap POSTs are refused (429),
+ * never queued. */
+const RUNNING_JOBS_DEFAULT_CAP = 16;
+
+function maxCompatJobs(): number {
+  const override = process.env.WIGOLO_SERVE_MAX_COMPAT_JOBS;
+  if (override) {
+    const n = Number(override);
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  return RUNNING_JOBS_DEFAULT_CAP;
+}
+
+// Count of background crawls currently EXECUTING ('scraping'). Incremented at
+// job launch, decremented when the crawl promise settles (success or failure).
+// Tracked separately from the job store because store eviction could remove a
+// still-running job's entry — this counter follows execution, not storage.
+let runningCrawlJobs = 0;
+
 function jobStoreMaxBytes(): number {
   const override = process.env.WIGOLO_SERVE_JOB_STORE_MAX_BYTES;
   if (override) {
@@ -375,13 +396,29 @@ async function handleCrawlStart(req: IncomingMessage, ctx: CompatContext): Promi
   if (limitErr) return fail(ctx, 400, limitErr);
   const maxPages = clampCrawlLimit(body);
 
+  // Concurrent-execution cap: the job-store caps bound storage, not running
+  // work. Over the cap → refuse (429), never queue.
+  const jobCap = maxCompatJobs();
+  if (runningCrawlJobs >= jobCap) {
+    ctx.respond(
+      429,
+      {
+        success: false,
+        error: `Too many crawl jobs are running (cap ${jobCap}). Retry after a short delay, or raise WIGOLO_SERVE_MAX_COMPAT_JOBS.`,
+      },
+      { 'Retry-After': '5' },
+    );
+    return;
+  }
+
   const job = jobStore.create();
   const input: CrawlInput = { url, ...(maxPages !== undefined ? { max_pages: maxPages } : {}) };
 
   // Drive the crawl in the background; the client polls GET crawl/{id}. The
   // router's concurrency slot has already been released for this request (the
-  // POST returns immediately), so the background work is intentionally
-  // untracked — bounded by the crawl clamps + job-store caps.
+  // POST returns immediately); concurrent background crawls are bounded by
+  // runningCrawlJobs + the crawl clamps, storage by the job-store caps.
+  runningCrawlJobs++;
   void handleCrawl(input, ctx.subsystems.router)
     .then((result) => {
       const crawl = result as CrawlOutput;
@@ -403,6 +440,9 @@ async function handleCrawlStart(req: IncomingMessage, ctx: CompatContext): Promi
     .catch((err: unknown) => {
       log.error('background crawl failed', { id: job.id, error: String(err) });
       jobStore.settle(job, { status: 'failed', error: err instanceof Error ? err.message : String(err) });
+    })
+    .finally(() => {
+      if (runningCrawlJobs > 0) runningCrawlJobs--;
     });
 
   ctx.respond(200, { success: true, id: job.id });

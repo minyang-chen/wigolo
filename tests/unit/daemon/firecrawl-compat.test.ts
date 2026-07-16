@@ -72,10 +72,12 @@ async function importShim() {
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.WIGOLO_SERVE_JOB_STORE_MAX_BYTES;
+  delete process.env.WIGOLO_SERVE_MAX_COMPAT_JOBS;
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.WIGOLO_SERVE_MAX_COMPAT_JOBS;
 });
 
 describe('firecrawl-compat — scrape', () => {
@@ -329,6 +331,111 @@ describe('firecrawl-compat — crawl job lifecycle', () => {
     await handleCompatRequest(fakeReq('POST', { url: 'https://a.com', limit: 9999 }), FAKE_RES, start.ctx);
     expect(start.captured[0].status).toBe(400);
     expect(mockHandleCrawl).not.toHaveBeenCalled();
+  });
+});
+
+describe('firecrawl-compat — concurrent running-jobs cap', () => {
+  /** Start a crawl POST whose handleCrawl promise stays pending until resolved. */
+  function pendingCrawl(): { resolve: () => void } {
+    let resolveFn!: (v: unknown) => void;
+    mockHandleCrawl.mockReturnValueOnce(new Promise((res) => { resolveFn = res; }));
+    return {
+      resolve: () => resolveFn({ pages: [], total_found: 0, crawled: 0 }),
+    };
+  }
+
+  async function postCrawl(handleCompatRequest: typeof import('../../../src/daemon/rest/firecrawl-compat.js').handleCompatRequest): Promise<Captured> {
+    const { ctx, captured } = makeCtx('/v1/crawl');
+    await handleCompatRequest(fakeReq('POST', { url: 'https://a.com' }), FAKE_RES, ctx);
+    return captured[0];
+  }
+
+  it('16 running (default cap) → 17th POST 429 {success:false}; settling frees capacity', async () => {
+    const { handleCompatRequest } = await importShim();
+    const resolvers: Array<{ resolve: () => void }> = [];
+    for (let i = 0; i < 16; i++) {
+      resolvers.push(pendingCrawl());
+      const r = await postCrawl(handleCompatRequest);
+      expect(r.status).toBe(200);
+    }
+
+    // 17th over the cap → 429, refused (not queued), no job started.
+    const over = await postCrawl(handleCompatRequest);
+    expect(over.status).toBe(429);
+    expect((over.body as { success: boolean }).success).toBe(false);
+    expect((over.body as { error: string }).error).toMatch(/WIGOLO_SERVE_MAX_COMPAT_JOBS|16/);
+    expect(mockHandleCrawl).toHaveBeenCalledTimes(16);
+
+    // A job settling frees capacity: resolve one, next POST succeeds.
+    resolvers[0].resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    const freed = pendingCrawl();
+    const next = await postCrawl(handleCompatRequest);
+    expect(next.status).toBe(200);
+
+    // Drain all pending crawls so the counter is 0 for later tests.
+    for (let i = 1; i < 16; i++) resolvers[i].resolve();
+    freed.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  it('env override WIGOLO_SERVE_MAX_COMPAT_JOBS is honored', async () => {
+    process.env.WIGOLO_SERVE_MAX_COMPAT_JOBS = '1';
+    const { handleCompatRequest } = await importShim();
+    const first = pendingCrawl();
+    const r1 = await postCrawl(handleCompatRequest);
+    expect(r1.status).toBe(200);
+
+    const r2 = await postCrawl(handleCompatRequest);
+    expect(r2.status).toBe(429);
+    expect((r2.body as { success: boolean }).success).toBe(false);
+
+    // Settle → capacity frees under the override too.
+    first.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    const second = pendingCrawl();
+    const r3 = await postCrawl(handleCompatRequest);
+    expect(r3.status).toBe(200);
+    second.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  it('429 refusal carries Retry-After header when the respond seam gets headers', async () => {
+    process.env.WIGOLO_SERVE_MAX_COMPAT_JOBS = '1';
+    const { handleCompatRequest } = await importShim();
+    const first = pendingCrawl();
+    await postCrawl(handleCompatRequest);
+
+    const headersCaptured: Array<Record<string, string> | undefined> = [];
+    const ctx = {
+      subsystems: SUBSYSTEMS,
+      bindIsLoopback: true,
+      subPath: '/v1/crawl',
+      respond: (_status: number, _body: unknown, headers?: Record<string, string>) => headersCaptured.push(headers),
+    };
+    await handleCompatRequest(fakeReq('POST', { url: 'https://a.com' }), FAKE_RES, ctx);
+    expect(headersCaptured[0]).toEqual({ 'Retry-After': '5' });
+
+    first.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  it('a crawl that rejects also frees capacity', async () => {
+    process.env.WIGOLO_SERVE_MAX_COMPAT_JOBS = '1';
+    const { handleCompatRequest } = await importShim();
+    let rejectFn!: (e: Error) => void;
+    mockHandleCrawl.mockReturnValueOnce(new Promise((_res, rej) => { rejectFn = rej; }));
+    const r1 = await postCrawl(handleCompatRequest);
+    expect(r1.status).toBe(200);
+
+    rejectFn(new Error('boom'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const next = pendingCrawl();
+    const r2 = await postCrawl(handleCompatRequest);
+    expect(r2.status).toBe(200);
+    next.resolve();
+    await new Promise((r) => setTimeout(r, 0));
   });
 });
 
