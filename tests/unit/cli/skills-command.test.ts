@@ -1,33 +1,44 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 
-// Detection is the only engine input we mock — everything else runs the real
-// planner/executor/list against a temp project (cwd) + temp data dir.
-const { detectAgentsMock } = vi.hoisted(() => ({ detectAgentsMock: vi.fn() }));
-vi.mock('../../../src/cli/tui/agents.js', () => ({
-  detectAgents: detectAgentsMock,
+// Detection comes from the AGENT REGISTRY (detectInstalledHandlers). We mock
+// only that seam — everything else (planner/executor/list + the real handler
+// list, incl. cline) runs for real against a temp project (cwd), temp HOME,
+// and temp data dir. Real handler detect() probes PATH binaries (`which`), so
+// deterministic tests control detection via the mock; the cline auto-detect
+// test swaps the REAL implementation back in against the mocked HOME.
+const { detectHandlersMock, homeRef } = vi.hoisted(() => ({
+  detectHandlersMock: vi.fn(),
+  homeRef: { dir: '' },
 }));
 
-// Full registry (used by the "none detected" and "not supported" paths).
-const FULL_REGISTRY = [
-  { id: 'claude-code', displayName: 'Claude Code', detected: false },
-  { id: 'cursor', displayName: 'Cursor', detected: false },
-  { id: 'vscode', displayName: 'VS Code', detected: false },
-  { id: 'zed', displayName: 'Zed', detected: false },
-  { id: 'gemini-cli', displayName: 'Gemini CLI', detected: false },
-  { id: 'windsurf', displayName: 'Windsurf', detected: false },
-  { id: 'codex', displayName: 'Codex', detected: false },
-  { id: 'opencode', displayName: 'OpenCode', detected: false },
-  { id: 'antigravity', displayName: 'Antigravity', detected: false },
-];
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, homedir: () => homeRef.dir || actual.homedir() };
+});
+
+vi.mock('../../../src/cli/agents/registry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/cli/agents/registry.js')>();
+  return { ...actual, detectInstalledHandlers: detectHandlersMock };
+});
+
+import { agentHandlers } from '../../../src/cli/agents/registry.js';
 
 function withDetected(ids: string[]): void {
-  detectAgentsMock.mockReturnValue(
-    FULL_REGISTRY.map((d) => ({ ...d, detected: ids.includes(d.id) })),
+  detectHandlersMock.mockImplementation(() =>
+    agentHandlers.filter((h) => ids.includes(h.id)),
   );
+}
+
+/** Route detection through the REAL registry detect() implementations. */
+async function withRealDetection(): Promise<void> {
+  const actual = await vi.importActual<typeof import('../../../src/cli/agents/registry.js')>(
+    '../../../src/cli/agents/registry.js',
+  );
+  detectHandlersMock.mockImplementation(actual.detectInstalledHandlers);
 }
 
 /** Hash the entire file tree under a dir → detects any fs mutation. */
@@ -53,6 +64,7 @@ function hashTree(root: string): string {
 
 let tmpProject: string;
 let tmpData: string;
+let tmpHome: string;
 let cwdSpy: ReturnType<typeof vi.spyOn>;
 let stdoutLines: string[];
 let stderrLines: string[];
@@ -62,11 +74,13 @@ let stderrSpy: ReturnType<typeof vi.spyOn>;
 let runSkills: (args: string[]) => Promise<number>;
 
 beforeEach(async () => {
-  detectAgentsMock.mockReset();
+  detectHandlersMock.mockReset();
   withDetected([]);
 
   tmpProject = mkdtempSync(join(tmpdir(), 'wg-skills-proj-'));
   tmpData = mkdtempSync(join(tmpdir(), 'wg-skills-data-'));
+  tmpHome = mkdtempSync(join(tmpdir(), 'wg-skills-home-'));
+  homeRef.dir = tmpHome;
   process.env.WIGOLO_DATA_DIR = tmpData;
 
   cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpProject);
@@ -91,8 +105,10 @@ afterEach(() => {
   stdoutSpy.mockRestore();
   stderrSpy.mockRestore();
   delete process.env.WIGOLO_DATA_DIR;
+  homeRef.dir = '';
   rmSync(tmpProject, { recursive: true, force: true });
   rmSync(tmpData, { recursive: true, force: true });
+  rmSync(tmpHome, { recursive: true, force: true });
 });
 
 function out(): string {
@@ -198,6 +214,19 @@ describe('runSkills — detection default', () => {
     expect(code).toBe(0);
     const env = jsonEnvelope();
     expect(env.actions.some((a) => a.agents.includes('claude-code'))).toBe(true);
+  });
+
+  it('a ~/.cline dir in HOME auto-detects cline into the default plan (real registry detect)', async () => {
+    // Real registry detection against the mocked HOME: cline's handler probes
+    // ~/.cline — no --agent flag needed. This is the reason detection MUST go
+    // through the agent registry (the tui registry has no cline entry at all).
+    await withRealDetection();
+    mkdirSync(join(tmpHome, '.cline'), { recursive: true });
+    const code = await runSkills(['add', 'wigolo-search', '--dry-run', '--json']);
+    expect(code).toBe(0);
+    const env = jsonEnvelope();
+    expect(env.actions.some((a) => a.agents.includes('cline'))).toBe(true);
+    expect(env.actions.some((a) => a.path.includes('.cline/skills'))).toBe(true);
   });
 });
 

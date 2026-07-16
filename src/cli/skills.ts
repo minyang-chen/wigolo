@@ -13,7 +13,7 @@ import type {
   Scope,
   SkillsPlan,
 } from './agents/skills/index.js';
-import { detectAgents } from './tui/agents.js';
+import { agentHandlers, detectInstalledHandlers } from './agents/registry.js';
 
 const USAGE = [
   'Usage: wigolo skills <subcommand> [packs...] [options]',
@@ -150,11 +150,10 @@ function splitCsv(s: string): string[] {
     .filter(Boolean);
 }
 
-/** Agent ids the wider agent registry knows but that carry no skills target. */
+/** Agent ids the agent registry knows but that carry no skills target. */
 function noSkillsAgentIds(): Set<string> {
   const supported = new Set<string>(SUPPORTED_AGENTS);
-  const registered = detectAgents({}).map((d) => d.id);
-  return new Set(registered.filter((id) => !supported.has(id)));
+  return new Set(agentHandlers.map((h) => h.id).filter((id) => !supported.has(id)));
 }
 
 const SUPPORTED_LIST = [...SUPPORTED_AGENTS].join(', ');
@@ -240,11 +239,11 @@ function resolveAgents(parsed: ParsedArgs): { agents: string[]; detectedNote?: s
   if (parsed.agents.length) {
     return { agents: parsed.agents };
   }
-  // No --agent → all DETECTED skills-capable agents.
+  // No --agent → all DETECTED skills-capable agents (agent-registry detect).
   const supportedSet = new Set<string>(SUPPORTED_AGENTS);
-  const detected = detectAgents({})
-    .filter((d) => d.detected && supportedSet.has(d.id))
-    .map((d) => d.id);
+  const detected = detectInstalledHandlers()
+    .map((h) => h.id)
+    .filter((id) => supportedSet.has(id));
   if (detected.length === 0) {
     return {
       agents: [],
