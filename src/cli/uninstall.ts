@@ -66,6 +66,25 @@ export async function runUninstall(args: string[]): Promise<number> {
     return 0;
   }
 
+  // Skills sweep — runs INDEPENDENT of detected handlers and BEFORE the
+  // no-handlers early return, so receipt-driven skill packs are cleaned up even
+  // when no agent binary is currently detected on this machine.
+  let skillsRemoved = 0;
+  let skillsLeft = 0;
+  try {
+    const { removeAllSkills } = await import('./agents/skills/index.js');
+    const skills = removeAllSkills({ cwd: process.cwd() });
+    skillsRemoved = skills.removed.length;
+    skillsLeft = skills.refused.length;
+    if (skillsRemoved > 0 || skillsLeft > 0) {
+      process.stdout.write(`\nSkills: ${skillsRemoved} removed`);
+      process.stdout.write(skillsLeft > 0 ? `, ${skillsLeft} left in place (modified or protected).\n` : '.\n');
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`  ! Skills sweep failed: ${message}\n`);
+  }
+
   const handlers = detectInstalledHandlers();
 
   if (handlers.length === 0) {

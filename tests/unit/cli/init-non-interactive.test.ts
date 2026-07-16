@@ -7,6 +7,7 @@ const {
   runWarmupMock, detectAgentsMock, selectAgentsMock, applyConfigsMock, runVerifyMock,
   systemCheckMock, getAgentHandlerMock, probeSetupStatusMock, summarizeSetupMock,
   applyHeadlessSetMock, saveMock, createSettingsStoreMock, fakeStoreSetMock, storeKeyMock, configState,
+  installSkillsMock,
 } = vi.hoisted(() => {
   const fakeStoreSetMock = vi.fn();
   const fakeStore = {
@@ -40,6 +41,7 @@ const {
     fakeStoreSetMock,
     storeKeyMock: vi.fn(),
     configState: { dataDir: '/tmp/data' },
+    installSkillsMock: vi.fn(() => ({ written: [], removed: [], refused: [], notices: [] })),
   };
 });
 
@@ -69,6 +71,11 @@ vi.mock('../../../src/config.js', () => ({
 }));
 vi.mock('../../../src/cli/agents/registry.js', () => ({
   getAgentHandler: getAgentHandlerMock,
+}));
+vi.mock('../../../src/cli/agents/skills/index.js', () => ({
+  installSkills: installSkillsMock,
+  removeAllSkills: vi.fn(),
+  SUPPORTED_AGENTS: ['claude-code', 'codex', 'cursor', 'gemini-cli', 'cline', 'windsurf'],
 }));
 vi.mock('../../../src/cli/tui/utils/config-writer.js', () => ({
   saveInitConfig: vi.fn(),
@@ -156,8 +163,87 @@ beforeEach(() => {
   createSettingsStoreMock.mockClear();
   fakeStoreSetMock.mockClear();
   storeKeyMock.mockReset().mockResolvedValue({ location: 'keychain' });
+  installSkillsMock.mockReset().mockReturnValue({ written: [], removed: [], refused: [], notices: [] });
   // Ensure WIGOLO_LLM_API_KEY is unset by default so tests are isolated
   delete process.env.WIGOLO_LLM_API_KEY;
+});
+
+describe('runInit --non-interactive: skills engine wiring', () => {
+  function captureOut(): { restore: () => void } {
+    const origOut = process.stdout.write.bind(process.stdout);
+    const origErr = process.stderr.write.bind(process.stderr);
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    return {
+      restore: () => {
+        process.stdout.write = origOut;
+        process.stderr.write = origErr;
+      },
+    };
+  }
+
+  it('invokes the skills engine ONCE with the selected skills-capable agents at global scope', async () => {
+    const cap = captureOut();
+    try {
+      await runInit(['--non-interactive', '--agents=cursor,claude-code', '--skip-verify']);
+    } finally {
+      cap.restore();
+    }
+    expect(installSkillsMock).toHaveBeenCalledTimes(1);
+    const arg = installSkillsMock.mock.calls[0]?.[0] as { scope: string; agents: string[] };
+    expect(arg.scope).toBe('global');
+    // Both cursor and claude-code are engine-supported, so both are passed.
+    expect(arg.agents.sort()).toEqual(['claude-code', 'cursor']);
+  });
+
+  it('filters non-skills-capable agents (vscode/zed) out of the engine call — no error', async () => {
+    // vscode is a valid init agent but has no skills target; it must be dropped
+    // before the engine call, leaving only the skills-capable selection.
+    getAgentHandlerMock.mockReturnValue({
+      id: 'vscode', displayName: 'VS Code',
+      supportsSkills: false, supportsCommands: false,
+      installInstructions: vi.fn().mockResolvedValue(undefined),
+    });
+    const cap = captureOut();
+    let code: number;
+    try {
+      code = await runInit(['--non-interactive', '--agents=vscode,cursor', '--skip-verify']);
+    } finally {
+      cap.restore();
+    }
+    expect(code).toBe(0);
+    expect(installSkillsMock).toHaveBeenCalledTimes(1);
+    const arg = installSkillsMock.mock.calls[0]?.[0] as { agents: string[] };
+    expect(arg.agents).toEqual(['cursor']);
+  });
+
+  it('does NOT invoke the engine when no selected agent is skills-capable', async () => {
+    const cap = captureOut();
+    try {
+      await runInit(['--non-interactive', '--agents=vscode,zed', '--skip-verify']);
+    } finally {
+      cap.restore();
+    }
+    expect(installSkillsMock).not.toHaveBeenCalled();
+  });
+
+  it('summary line reflects the engine ApplyResult (files written), not a hardcoded count', async () => {
+    installSkillsMock.mockReturnValue({
+      written: ['/h/.claude/skills/wigolo/SKILL.md', '/h/.claude/skills/wigolo-search/SKILL.md'],
+      removed: [], refused: [], notices: [],
+    });
+    const lines: string[] = [];
+    const origOut = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((c: unknown) => { lines.push(String(c)); return true; }) as typeof process.stdout.write;
+    try {
+      await runInit(['--non-interactive', '--agents=cursor', '--skip-verify']);
+    } finally {
+      process.stdout.write = origOut;
+    }
+    const out = lines.join('');
+    expect(out).toContain('2 files written');
+    expect(out).not.toContain('8 skills');
+  });
 });
 
 describe('runInit --non-interactive', () => {

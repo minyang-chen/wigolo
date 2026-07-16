@@ -61,6 +61,48 @@ const INIT_USAGE = [
   '',
 ].join('\n');
 
+/**
+ * Install skill packs for the selected agents through the shared skills engine.
+ *
+ * A single engine call (`installSkills`, global scope) covers every selected
+ * agent the engine can target. Selected agents that have no skills destination
+ * are filtered out against the engine's supported set, so passing e.g. `vscode`
+ * or `zed` is a no-op rather than an error. The summary line is derived from the
+ * engine's ApplyResult (files written vs. refused), replacing the old hardcoded
+ * "8 skills installed" message.
+ *
+ * `print`, `ok`, `warn` are injected so this stays wired to the caller's own
+ * stdout/stderr routing (no raw console.log).
+ */
+async function installSelectedSkills(
+  selected: readonly string[],
+  print: (line?: string) => void,
+  ok: (s: string) => string,
+  warn: (s: string) => string,
+): Promise<void> {
+  const { installSkills, SUPPORTED_AGENTS } = await import('./agents/skills/index.js');
+  const supported = new Set<string>(SUPPORTED_AGENTS);
+  const agents = selected.filter((id) => supported.has(id));
+  if (agents.length === 0) return;
+
+  try {
+    const result = installSkills({ scope: 'global', agents, cwd: process.cwd() });
+    const written = result.written.length;
+    const refused = result.refused.length;
+    if (written > 0) {
+      print(`  ${ok(`Skills installed (${written} file${written === 1 ? '' : 's'} written)`)}`);
+    } else {
+      print(`  ${ok('Skills up to date (no changes)')}`);
+    }
+    if (refused > 0) {
+      print(`  ${warn(`${refused} skill path(s) left untouched (modified or protected)`)}`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    print(`  ${warn(`Skills skipped: ${message}`)}`);
+  }
+}
+
 export async function runInit(args: string[]): Promise<number> {
   let flags;
   try {
@@ -152,6 +194,34 @@ async function runInitWizard(flags: InitFlagsResolved): Promise<number> {
       emitInitJson({ status: 'ok', path: 'wizard', warmup: false, agentsRegistered: [], configPersisted: false, message: 'uninstalled mid-session' });
     }
     return 0;
+  }
+
+  // Install skills for the agents the wizard selected. The wizard's finish step
+  // persists `configuredAgents` into the SAME init-config the plain path writes;
+  // read it back here (after the Ink shell has unmounted) and route it through
+  // the identical shared engine call the plain path uses. Precedent: warmup runs
+  // after the Ink shell unmounts too, for the same clean-terminal reason.
+  try {
+    const { getConfig } = await import('../config.js');
+    const { readInitConfig } = await import('./tui/utils/config-writer.js');
+    const persisted = readInitConfig(getConfig().dataDir);
+    const configured = persisted['configuredAgents'];
+    const wizardAgents = Array.isArray(configured)
+      ? configured.filter((a): a is string => typeof a === 'string')
+      : [];
+    if (wizardAgents.length > 0) {
+      const { ok, warn } = await import('./tui/format.js');
+      await installSelectedSkills(
+        wizardAgents,
+        (line = '') => process.stderr.write(`${line}\n`),
+        ok,
+        warn,
+      );
+    }
+  } catch (err) {
+    // Best-effort: a skills-install failure never fails the wizard flow.
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`Skills skipped: ${message}\n`);
   }
 
   // Pre-cache hint: components download on first use. Print on BOTH paths so a
@@ -334,9 +404,10 @@ async function runInitPlain(flags: InitFlagsResolved): Promise<number> {
       return 1;
     }
 
-    // Install instructions, skills, and commands for agents that support them.
-    // Each step has its own try/catch so a failure in one step does not cause
-    // the others to be reported as "skipped".
+    // Install instructions and commands for agents that support them. Each step
+    // has its own try/catch so a failure in one step does not cause the others
+    // to be reported as "skipped". Skills are installed ONCE after this loop via
+    // the shared skills engine, not per handler.
     const { getAgentHandler } = await import('./agents/registry.js');
 
     for (const id of selected) {
@@ -352,16 +423,6 @@ async function runInitPlain(flags: InitFlagsResolved): Promise<number> {
         out(`  ${warn(`Instructions skipped: ${message}`)}`);
       }
 
-      if (handler.supportsSkills && handler.installSkills) {
-        try {
-          await handler.installSkills();
-          out(`  ${ok('8 skills installed')}`);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          out(`  ${warn(`Skills skipped: ${message}`)}`);
-        }
-      }
-
       if (handler.supportsCommands && handler.installCommand) {
         try {
           await handler.installCommand();
@@ -372,6 +433,12 @@ async function runInitPlain(flags: InitFlagsResolved): Promise<number> {
         }
       }
     }
+
+    // Skills — one engine call for every selected skills-capable agent at global
+    // scope. Selected agents with no skills target (vscode/zed/antigravity/
+    // opencode) are simply not in the engine's supported set and contribute
+    // nothing; that is not an error.
+    await installSelectedSkills(selected, out, ok, warn);
   }
 
   saveInitConfig(config.dataDir, {

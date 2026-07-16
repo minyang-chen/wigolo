@@ -345,6 +345,22 @@ Thin, typed clients for the [REST API](#rest-api--self-host) live in this repo �
 | 🤖 `agent` | Autonomous gather loop: plan → search → fetch → extract → synthesize, with a step log, time budget, and optional output schema. |
 | 🔁 `diff` + ⏱️ `watch` | See exactly what changed on a page since last visit; re-check on a schedule and deliver changes to a webhook. |
 
+## Agent skills
+
+wigolo ships an 11-pack skill catalog — one focused how-to per tool (search, fetch, crawl, extract, cache, find-similar, research, agent, diff, watch, plus an overview pack) — so your coding agent knows how to drive each tool well without you spelling it out. `wigolo init` installs them into every agent it wires up; you can also manage them directly:
+
+```bash
+wigolo skills add          # install into agents in the current project
+wigolo skills add --global # install into your per-user agent config instead
+wigolo skills list         # show what's installed and whether it's current
+wigolo skills remove       # remove the packs wigolo installed
+```
+
+- **Project vs. global.** Default is the project you're in; `--global` targets your home-level agent config.
+- **Idempotent.** Re-running `add` only rewrites what changed; already-current packs are left alone.
+- **Receipts, not guesswork.** Every install is recorded, so `remove` (and `wigolo uninstall`) restores your files to exactly what was there before — hand-edited skills are detected and never clobbered.
+- **Dry-run first.** Preview every create / update / skip before anything touches disk with `--dry-run`.
+
 ## Why it's different
 
 wigolo isn't the free stand-in you settle for until the budget clears — it's built to hold the same line as the paid services in this lane, and it brings receipts. What actually separates it:

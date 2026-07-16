@@ -26,6 +26,13 @@ vi.mock('../../src/config.js', () => ({
   getConfig: vi.fn(() => ({ dataDir: tmpData })),
 }));
 
+// No agent handlers detected → exercises runUninstall's `handlers.length === 0`
+// early-return path, proving the skills sweep runs BEFORE it (independent of
+// detected handlers).
+vi.mock('../../src/cli/agents/registry.js', () => ({
+  detectInstalledHandlers: vi.fn(() => []),
+}));
+
 async function engine() {
   return import('../../src/cli/agents/skills/index.js');
 }
@@ -234,5 +241,40 @@ describe('staggered-add per-pack version labeling', () => {
         expect(p.version.length).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe('CLI uninstall wiring — receipt-less legacy sweep', () => {
+  it('runUninstall removes legacy-byte packs with an EMPTY receipt store, no handlers detected', async () => {
+    // Seed legacy (receipt-less) bytes on disk for a claude-code global pack.
+    const packDir = join(tmpHome, '.claude', 'skills', 'wigolo-search');
+    mkdirSync(packDir, { recursive: true });
+    writeFileSync(join(packDir, 'SKILL.md'), readFileSync(FIXTURE_LEGACY, 'utf-8'), 'utf-8');
+    expect(existsSync(join(packDir, 'SKILL.md'))).toBe(true);
+
+    // Empty receipt store: the engine's receipt-less pass (legacy/canonical byte
+    // recognition) is what must do the removal.
+    mkdirSync(join(tmpData, 'skills'), { recursive: true });
+    writeFileSync(join(tmpData, 'skills', 'receipts.json'), '{}', 'utf-8');
+
+    // runUninstall reads process.cwd() for the engine call; point it at tmpCwd.
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpCwd);
+    const origOut = process.stdout.write.bind(process.stdout);
+    const origErr = process.stderr.write.bind(process.stderr);
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    try {
+      const { runUninstall } = await import('../../src/cli/uninstall.js');
+      const code = await runUninstall([]);
+      expect(code).toBe(0);
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+      cwdSpy.mockRestore();
+    }
+
+    // The receipt-less legacy pass removed the pack file even though no agent
+    // handler was detected (early-return path).
+    expect(existsSync(join(packDir, 'SKILL.md'))).toBe(false);
   });
 });

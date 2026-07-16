@@ -31,6 +31,8 @@ import {
   type SystemCheckResult,
 } from '../system-check.js';
 import { defaultConfigPath } from '../../../persisted-config.js';
+import { dirname } from 'node:path';
+import { saveInitConfig } from '../utils/config-writer.js';
 import {
   probeSetupStatus,
   defaultProbeDeps,
@@ -457,6 +459,16 @@ export function WizardSteps(props: WizardStepsProps): React.ReactElement {
           }
         }
       }
+
+      // 5. Persist the wizard's agent selection into the SAME init-config key the
+      //    plain path writes (configuredAgents). The wizard itself installs no
+      //    skills — after the Ink shell unmounts, runInit's wizard branch reads
+      //    this back and runs the shared skills engine for these agents. Writing
+      //    the receipt here is the only wizard-side seam that hand-off needs.
+      saveInitConfig(dirname(configPath), {
+        configuredAgents: selectedAgentIds,
+        lastInit: new Date().toISOString(),
+      });
 
     } finally {
       setSaving(false);
