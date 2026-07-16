@@ -222,12 +222,9 @@ describe('withReceiptsLock — concurrent cross-process writers (F17)', () => {
   }
 
   it('no lost update: every key from both racing writers survives', async () => {
-    if (!tsxAvailable()) {
-      // Documented residual: tsx not resolvable → cannot spawn a real TS child.
-      // The in-process sequential-lock tests above still cover correctness.
-      expect(tsxAvailable() || true).toBe(true);
-      return;
-    }
+    // tsx is a devDependency — resolvable in any dev checkout. Fail loud rather
+    // than silently passing if the environment can't spawn the racing child.
+    expect(tsxAvailable(), 'tsx not resolvable — cannot run the lock-race test').toBe(true);
 
     const { spawn } = await import('node:child_process');
     const { fileURLToPath } = await import('node:url');
