@@ -115,7 +115,9 @@ export async function spawnServe(opts: SpawnServeOptions): Promise<SpawnedServe>
   });
 
   const baseUrl = `http://127.0.0.1:${opts.port}`;
-  const headers = opts.token ? { Authorization: `Bearer ${opts.token}` } : {};
+  const headers: Record<string, string> = opts.token
+    ? { Authorization: `Bearer ${opts.token}` }
+    : {};
   const deadline = Date.now() + 60_000;
   let healthy = false;
   while (Date.now() < deadline) {
