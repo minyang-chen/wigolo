@@ -23,6 +23,13 @@ export interface DaemonOptions {
   apiToken?: string | null;
   /** Operator opted into open remote access. */
   allowUnauthenticated?: boolean;
+  /**
+   * The bind host the REST auth pipeline reasons about, independent of the
+   * actual TCP listen host. Defaults to `host`. Lets tests simulate a
+   * non-loopback bind (open-mode override / target-guard rows) without
+   * actually binding a public interface.
+   */
+  restBindHost?: string;
 }
 
 export class DaemonHttpServer {
@@ -36,6 +43,7 @@ export class DaemonHttpServer {
   private readonly host: string;
   private readonly apiToken: string | null;
   private readonly allowUnauthenticated: boolean;
+  private readonly restBindHost: string;
   private restRouter: RestRouter | null = null;
   private restRouterPromise: Promise<RestRouter> | null = null;
 
@@ -46,6 +54,7 @@ export class DaemonHttpServer {
     // DaemonHttpServer construction (tests, embedders) still honors it.
     this.apiToken = options.apiToken !== undefined ? options.apiToken : resolveApiToken();
     this.allowUnauthenticated = options.allowUnauthenticated ?? false;
+    this.restBindHost = options.restBindHost ?? options.host;
   }
 
   /**
@@ -59,7 +68,7 @@ export class DaemonHttpServer {
         const { RestRouter } = await import('./rest/router.js');
         const router = new RestRouter({
           subsystems: this.subsystems!,
-          bindHost: this.host,
+          bindHost: this.restBindHost,
           token: this.apiToken,
           allowUnauthenticated: this.allowUnauthenticated,
         });

@@ -127,7 +127,11 @@ export function readJsonBodyCapped(req: IncomingMessage, capBytes: number): Prom
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
       if (size > capBytes) {
-        req.destroy();
+        // Stop buffering and reject; the caller writes a 413 on the still-open
+        // response. We do NOT destroy the request socket — that would reset the
+        // connection before the 413 reaches the client. Pausing drops us out of
+        // flowing mode so we stop accumulating.
+        req.pause();
         finish(() => reject(new BodyTooLargeError()));
         return;
       }
