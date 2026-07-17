@@ -266,7 +266,7 @@ export class MultiBrowserPool {
     if (!typePool.browser) {
       const launcher = getLauncher(type);
       log.debug('launching browser', { type });
-      typePool.browser = await launcher.launch({ headless: true, env: sanitizedChildEnv() });
+      typePool.browser = await launcher.launch({ headless: true, env: sanitizedChildEnv({ stripProxy: true }) });
     }
     return typePool.browser;
   }
@@ -434,7 +434,7 @@ export class MultiBrowserPool {
       dedicatedBrowser = await launcher.launch({
         headless: true,
         args: stealthLaunchArgs(resolvedType),
-        env: sanitizedChildEnv(),
+        env: sanitizedChildEnv({ stripProxy: true }),
       });
       advertisedUa = resolveStealthUA();
       ctx = await dedicatedBrowser.newContext(stealthContextOptions(advertisedUa));
