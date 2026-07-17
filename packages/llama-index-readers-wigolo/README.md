@@ -1,11 +1,11 @@
-# llama-index-readers-wigolo
+# wigolo-llamaindex
 
 LlamaIndex reader for [wigolo](https://github.com/KnockOutEZ/wigolo) — a local-first web search MCP server for AI coding agents.
 
 ## Installation
 
 ```bash
-pip install llama-index-readers-wigolo
+pip install wigolo-llamaindex
 ```
 
 Requires wigolo to be available via npx:
@@ -19,7 +19,7 @@ npm install -g wigolo
 ### Fetch URLs into Documents
 
 ```python
-from llama_index_readers_wigolo import WigoloMcpClient, WigoloWebReader
+from wigolo_llamaindex import WigoloMcpClient, WigoloWebReader
 
 async def main():
     async with WigoloMcpClient() as client:
@@ -35,7 +35,7 @@ async def main():
 ### Search and Load
 
 ```python
-from llama_index_readers_wigolo import WigoloMcpClient, WigoloSearchReader
+from wigolo_llamaindex import WigoloMcpClient, WigoloSearchReader
 
 async def main():
     async with WigoloMcpClient() as client:
@@ -51,7 +51,7 @@ async def main():
 
 ```python
 from llama_index.core import VectorStoreIndex
-from llama_index_readers_wigolo import WigoloMcpClient, WigoloWebReader
+from wigolo_llamaindex import WigoloMcpClient, WigoloWebReader
 
 async def build_index():
     async with WigoloMcpClient() as client:

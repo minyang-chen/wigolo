@@ -9,7 +9,7 @@ from typing import Any, Iterator, Optional
 from llama_index.core.readers.base import BaseReader
 from llama_index.core.schema import Document
 
-from llama_index_readers_wigolo.client import WigoloMcpClient
+from wigolo_llamaindex.client import WigoloMcpClient
 
 logger = logging.getLogger(__name__)
 

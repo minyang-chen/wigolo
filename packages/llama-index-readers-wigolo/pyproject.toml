@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "llama-index-readers-wigolo"
+name = "wigolo-llamaindex"
 version = "0.2.0"
 description = "LlamaIndex reader for wigolo — local-first web search MCP server"
 readme = "README.md"

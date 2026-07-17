@@ -1,4 +1,4 @@
-"""Shared test fixtures for llama-index-readers-wigolo."""
+"""Shared test fixtures for wigolo-llamaindex."""
 
 from __future__ import annotations
 

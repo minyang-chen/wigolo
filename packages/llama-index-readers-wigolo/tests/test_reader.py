@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from llama_index.core.schema import Document
 
-from llama_index_readers_wigolo.reader import WigoloWebReader, WigoloSearchReader
-from llama_index_readers_wigolo.client import WigoloMcpClient
+from wigolo_llamaindex.reader import WigoloWebReader, WigoloSearchReader
+from wigolo_llamaindex.client import WigoloMcpClient
 
 
 def _make_fetch_result(

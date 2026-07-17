@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from llama_index_readers_wigolo.client import WigoloMcpClient, WigoloClientError
+from wigolo_llamaindex.client import WigoloMcpClient, WigoloClientError
 from tests.conftest import (
     MOCK_INITIALIZE_RESPONSE,
     MOCK_FETCH_RESPONSE,

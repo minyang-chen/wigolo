@@ -1,7 +1,7 @@
 """LlamaIndex reader for wigolo — local-first web search MCP server."""
 
-from llama_index_readers_wigolo.client import WigoloMcpClient
-from llama_index_readers_wigolo.reader import WigoloSearchReader, WigoloWebReader
+from wigolo_llamaindex.client import WigoloMcpClient
+from wigolo_llamaindex.reader import WigoloSearchReader, WigoloWebReader
 
 __all__ = [
     "WigoloMcpClient",
