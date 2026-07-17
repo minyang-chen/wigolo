@@ -1,5 +1,5 @@
 {
-  "name": "wigolo-ai-sdk",
+  "name": "wigolo-vercel-ai-sdk",
   "version": "0.2.0",
   "description": "Vercel AI SDK tools for wigolo — local-first web search MCP server",
   "type": "module",
@@ -34,7 +34,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/KnockOutEZ/wigolo",
-    "directory": "packages/wigolo-ai-sdk"
+    "directory": "packages/wigolo-vercel-ai-sdk"
   },
   "peerDependencies": {
     "ai": ">=4.0.0",

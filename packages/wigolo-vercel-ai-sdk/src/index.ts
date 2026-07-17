@@ -1,5 +1,5 @@
 /**
- * wigolo-ai-sdk — Vercel AI SDK tools for wigolo.
+ * wigolo-vercel-ai-sdk — Vercel AI SDK tools for wigolo.
  *
  * Provides web search, fetch, crawl, find-similar, research, and agent tools
  * for use with the Vercel AI SDK. Tools communicate with the wigolo MCP server

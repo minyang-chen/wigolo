@@ -81,7 +81,7 @@ export class WigoloMcpClient {
     try {
       await this.sendRequest('initialize', {
         protocolVersion: '2025-03-26',
-        clientInfo: { name: 'wigolo-ai-sdk', version: '0.1.0' },
+        clientInfo: { name: 'wigolo-vercel-ai-sdk', version: '0.2.0' },
         capabilities: {},
       });
 
