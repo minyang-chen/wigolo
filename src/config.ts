@@ -2,7 +2,17 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseBrowserTypes } from './fetch/browser-types.js';
 import type { BrowserType } from './types.js';
-import { readPersistedConfig, resetPersistedConfig, defaultConfigPath } from './persisted-config.js';
+import {
+  readPersistedConfig,
+  resetPersistedConfig,
+  defaultConfigPath,
+  readCredentialFromKeychain,
+} from './persisted-config.js';
+import {
+  credentialKeychainUser,
+  recomposeWithUserinfo,
+  splitUserinfo,
+} from './fetch/proxy-credentials.js';
 
 export interface Config {
   searxngUrl: string | null;
@@ -14,6 +24,12 @@ export interface Config {
   fetchAllowPrivate: boolean;
   playwrightLoadTimeoutMs: number;
   playwrightNavTimeoutMs: number;
+  /** Upper bound on the browser tier's challenge-completion poll. A detected
+   * challenge is polled (not settled once) until the real page renders or a
+   * `cf_clearance` cookie appears; a challenge that clears within this window
+   * proceeds normally, otherwise it fast-fails. The effective deadline is the
+   * min() of this and the caller's remaining fetch budget. */
+  challengeCompletionTimeoutMs: number;
   searxngQueryTimeoutMs: number;
   searchFetchTimeoutMs: number;
   searchFetchTimeoutBalancedMs: number;
@@ -64,6 +80,10 @@ export interface Config {
   crawlPrivateDelayMs: number;
   useProxy: boolean;
   proxyUrl: string | null;
+  /** Opt-in challenge-solver service URL (Tier-B escape hatch). Off unless set. */
+  solverUrl: string | null;
+  /** Opt-in hosted reader-service URL (Tier-B escape hatch). Off unless set. */
+  hostedReaderUrl: string | null;
   userAgent: string | null;
   validateLinks: boolean;
   respectRobotsTxt: boolean;
@@ -136,6 +156,19 @@ export interface Config {
    *   - 'on'   : tried first for cold domains, then HTTP, then Playwright
    */
   tlsTier: 'off' | 'auto' | 'on';
+  /**
+   * Anti-bot fingerprint hardening / challenge-handling mode for the browser
+   * tier:
+   *   - 'off'  : never harden — the browser tier always uses the pooled default
+   *              fingerprint.
+   *   - 'auto' : harden ONLY when a browser fetch is an anti-bot / challenge
+   *              escalation (DEFAULT). A plain SPA-shell render or an explicit
+   *              browser request (render_js:'always' / auth / actions) is
+   *              unaffected.
+   *   - 'on'   : harden every browser fetch.
+   * Any other value normalizes to 'auto' (the safe default).
+   */
+  stealth: 'off' | 'auto' | 'on';
   /** Browser fingerprint profile passed to the TLS-impersonation backend. */
   tlsBrowser: string;
   /** Successes required before a domain is auto-promoted to TLS-first routing. */
@@ -247,6 +280,21 @@ export function validateTlsBrowser(raw: string | null | undefined, fallback: str
   return fallback;
 }
 
+/**
+ * Resolve a proxy/solver/reader URL, re-composing a keychain-stored credential
+ * onto a credential-free host URL. A value that already carries inline userinfo
+ * (typically from an env var — trusted + ephemeral) is used verbatim; the
+ * keychain is only consulted to complete a stripped, disk-persisted URL.
+ */
+function resolveCredentialUrl(raw: string | null, settingsKey: string): string | null {
+  if (!raw) return raw;
+  const { userinfo } = splitUserinfo(raw);
+  if (userinfo !== null) return raw; // already has creds (env) — use as-is
+  const stored = readCredentialFromKeychain(credentialKeychainUser(settingsKey));
+  if (!stored) return raw;
+  return recomposeWithUserinfo(raw, stored);
+}
+
 let cachedConfig: Config | null = null;
 
 export function getConfig(): Config {
@@ -273,6 +321,7 @@ export function getConfig(): Config {
     fetchAllowPrivate: envBool('WIGOLO_FETCH_ALLOW_PRIVATE', false, settings, 'fetchAllowPrivate'),
     playwrightLoadTimeoutMs: envInt('PLAYWRIGHT_LOAD_TIMEOUT_MS', 15000, settings, 'playwrightLoadTimeoutMs'),
     playwrightNavTimeoutMs: envInt('PLAYWRIGHT_NAV_TIMEOUT_MS', 30000, settings, 'playwrightNavTimeoutMs'),
+    challengeCompletionTimeoutMs: envInt('WIGOLO_CHALLENGE_COMPLETION_MS', 15000, settings, 'challengeCompletionTimeoutMs'),
     searxngQueryTimeoutMs: envInt('SEARXNG_QUERY_TIMEOUT_MS', 8000, settings, 'searxngQueryTimeoutMs'),
     searchFetchTimeoutMs: envInt('SEARCH_FETCH_TIMEOUT_MS', 15000, settings, 'searchFetchTimeoutMs'),
     searchFetchTimeoutBalancedMs: envInt('SEARCH_FETCH_TIMEOUT_BALANCED_MS', 3000, settings, 'searchFetchTimeoutBalancedMs'),
@@ -301,7 +350,15 @@ export function getConfig(): Config {
     crawlPrivateConcurrency: envInt('CRAWL_PRIVATE_CONCURRENCY', 10, settings, 'crawlPrivateConcurrency'),
     crawlPrivateDelayMs: envInt('CRAWL_PRIVATE_DELAY_MS', 0, settings, 'crawlPrivateDelayMs'),
     useProxy: envBool('USE_PROXY', false, settings, 'useProxy'),
-    proxyUrl: envStr('PROXY_URL', null, settings, 'proxyUrl'),
+    proxyUrl: resolveCredentialUrl(envStr('PROXY_URL', null, settings, 'proxyUrl'), 'proxyUrl'),
+    solverUrl: resolveCredentialUrl(
+      envStr('WIGOLO_SOLVER_URL', null, settings, 'solverUrl'),
+      'solverUrl',
+    ),
+    hostedReaderUrl: resolveCredentialUrl(
+      envStr('WIGOLO_HOSTED_READER_URL', null, settings, 'hostedReaderUrl'),
+      'hostedReaderUrl',
+    ),
     userAgent: envStr('USER_AGENT', null, settings, 'userAgent'),
     validateLinks: envBool('VALIDATE_LINKS', true, settings, 'validateLinks'),
     respectRobotsTxt: envBool('RESPECT_ROBOTS_TXT', true, settings, 'respectRobotsTxt'),
@@ -379,6 +436,10 @@ export function getConfig(): Config {
     tlsTier: (() => {
       const raw = (envStr('WIGOLO_TLS_TIER', 'off', settings, 'tlsTier') ?? 'off').toLowerCase();
       return raw === 'auto' || raw === 'on' ? (raw as 'auto' | 'on') : 'off';
+    })(),
+    stealth: (() => {
+      const raw = (envStr('WIGOLO_STEALTH', 'auto', settings, 'stealth') ?? 'auto').toLowerCase();
+      return raw === 'off' || raw === 'on' ? (raw as 'off' | 'on') : 'auto';
     })(),
     // The TLS-impersonation backend accepts a `<browser>_<version>` profile
     // string and forwards it into a Rust napi binding. Passing an unvalidated

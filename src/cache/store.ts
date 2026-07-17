@@ -725,6 +725,224 @@ export function recordTlsImpersonationSuccess(domain: string, threshold: number)
   }
 }
 
+export interface DomainClearance {
+  cookie: string;
+  ua: string;
+  tier: string;
+  expiresAt: string;
+}
+
+interface DomainClearanceRawRow {
+  cf_clearance: string | null;
+  clearance_ua: string | null;
+  clearance_tier: string | null;
+  clearance_expires_at: string | null;
+}
+
+/**
+ * Read the stored anti-bot clearance for a host. Keyed on the RAW hostname
+ * (the same key domain_routing uses) so `a.example.com` and `b.example.com`
+ * keep independent clearances. Returns null when no clearance cookie is
+ * recorded. Freshness is the caller's decision — an expired entry is still
+ * returned so callers can inspect `expiresAt`.
+ */
+export function getDomainClearance(host: string): DomainClearance | null {
+  try {
+    const db = getDatabase();
+    const row = db.prepare(
+      `SELECT cf_clearance, clearance_ua, clearance_tier, clearance_expires_at
+       FROM domain_routing WHERE domain = ? LIMIT 1`,
+    ).get(host) as DomainClearanceRawRow | undefined;
+    if (!row || row.cf_clearance == null) return null;
+    return {
+      cookie: row.cf_clearance,
+      ua: row.clearance_ua ?? '',
+      tier: row.clearance_tier ?? '',
+      expiresAt: row.clearance_expires_at ?? '',
+    };
+  } catch (err) {
+    log.warn('getDomainClearance failed', { host, error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/** Store (or replace) the anti-bot clearance for a host. */
+export function recordDomainClearance(host: string, clearance: DomainClearance): void {
+  try {
+    const db = getDatabase();
+    db.prepare(`
+      INSERT INTO domain_routing (
+        domain, prefer_playwright, http_failures,
+        cf_clearance, clearance_ua, clearance_tier, clearance_expires_at, last_updated
+      )
+      VALUES (?, 0, 0, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(domain) DO UPDATE SET
+        cf_clearance = excluded.cf_clearance,
+        clearance_ua = excluded.clearance_ua,
+        clearance_tier = excluded.clearance_tier,
+        clearance_expires_at = excluded.clearance_expires_at,
+        last_updated = datetime('now')
+    `).run(host, clearance.cookie, clearance.ua, clearance.tier, clearance.expiresAt);
+  } catch (err) {
+    log.warn('recordDomainClearance failed', { host, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Wipe the clearance fields for a host (routing row itself is retained). */
+export function clearDomainClearance(host: string): void {
+  try {
+    const db = getDatabase();
+    db.prepare(`
+      UPDATE domain_routing
+      SET cf_clearance = NULL, clearance_ua = NULL,
+          clearance_tier = NULL, clearance_expires_at = NULL,
+          last_updated = datetime('now')
+      WHERE domain = ?
+    `).run(host);
+  } catch (err) {
+    log.warn('clearDomainClearance failed', { host, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Record a per-host cooldown (epoch ms) after repeated blocks. */
+export function recordBackoff(host: string, untilEpochMs: number): void {
+  try {
+    const db = getDatabase();
+    db.prepare(`
+      INSERT INTO domain_routing (
+        domain, prefer_playwright, http_failures, backoff_until, last_403_at, last_updated
+      )
+      VALUES (?, 0, 0, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(domain) DO UPDATE SET
+        backoff_until = excluded.backoff_until,
+        last_403_at = datetime('now'),
+        last_updated = datetime('now')
+    `).run(host, String(untilEpochMs));
+  } catch (err) {
+    log.warn('recordBackoff failed', { host, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Read the per-host cooldown (epoch ms), or null when none is set. */
+export function getBackoff(host: string): number | null {
+  try {
+    const db = getDatabase();
+    const row = db.prepare(
+      'SELECT backoff_until FROM domain_routing WHERE domain = ? LIMIT 1',
+    ).get(host) as { backoff_until: string | null } | undefined;
+    if (!row || row.backoff_until == null) return null;
+    const parsed = Number(row.backoff_until);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch (err) {
+    log.warn('getBackoff failed', { host, error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/**
+ * Read-only projection of a domain_routing row for the `wigolo tune` surface.
+ *
+ * Deliberately OMITS the live clearance cookie value (`cf_clearance`) and the
+ * user-agent it was minted against (`clearance_ua`): both are session-bearing
+ * credentials that must never surface in an inspection command. Only the
+ * PRESENCE of a clearance and its expiry are reported.
+ */
+export interface DomainRoutingSummary {
+  domain: string;
+  /** Whether wigolo prefers the browser engine for this domain. */
+  preferBrowser: boolean;
+  preferTlsImpersonation: boolean;
+  tlsSuccessCount: number;
+  httpFailures: number;
+  backoffUntil?: string;
+  last403At?: string;
+  clearancePresent: boolean;
+  clearanceExpiresAt?: string;
+}
+
+interface DomainRoutingSummaryRawRow {
+  domain: string;
+  prefer_playwright: number | null;
+  prefer_tls_impersonation: number | null;
+  tls_success_count: number | null;
+  http_failures: number | null;
+  backoff_until: string | null;
+  last_403_at: string | null;
+  cf_clearance: string | null;
+  clearance_expires_at: string | null;
+}
+
+/**
+ * Every tracked domain's routing summary, ordered by domain. Follows the
+ * read-swallow convention of the other routing getters: a DB read failure
+ * degrades to an empty list rather than crashing an inspection command.
+ */
+export function listDomainRouting(): DomainRoutingSummary[] {
+  try {
+    const db = getDatabase();
+    const rows = db.prepare(
+      `SELECT domain, prefer_playwright, prefer_tls_impersonation, tls_success_count,
+              http_failures, backoff_until, last_403_at, cf_clearance, clearance_expires_at
+       FROM domain_routing
+       ORDER BY domain`,
+    ).all() as DomainRoutingSummaryRawRow[];
+    return rows.map((row) => ({
+      domain: row.domain,
+      preferBrowser: (row.prefer_playwright ?? 0) === 1,
+      preferTlsImpersonation: (row.prefer_tls_impersonation ?? 0) === 1,
+      tlsSuccessCount: row.tls_success_count ?? 0,
+      httpFailures: row.http_failures ?? 0,
+      backoffUntil: row.backoff_until ?? undefined,
+      last403At: row.last_403_at ?? undefined,
+      clearancePresent: row.cf_clearance != null,
+      clearanceExpiresAt: row.clearance_expires_at ?? undefined,
+    }));
+  } catch (err) {
+    log.warn('listDomainRouting failed', { error: err instanceof Error ? err.message : String(err) });
+    return [];
+  }
+}
+
+const RESET_ROUTING_COLUMNS = `
+  prefer_playwright = 0,
+  prefer_tls_impersonation = 0,
+  tls_success_count = 0,
+  http_failures = 0,
+  backoff_until = NULL,
+  last_403_at = NULL,
+  cf_clearance = NULL,
+  clearance_ua = NULL,
+  clearance_tier = NULL,
+  clearance_expires_at = NULL,
+  last_updated = datetime('now')
+`;
+
+/**
+ * Clear all learned routing prefs, backoff windows and clearance state for one
+ * host, returning the number of rows changed (0 when the host is unknown).
+ * Intentionally does NOT swallow errors — a busy/locked DB must surface to the
+ * caller so the CLI can report it, rather than silently leaving stale routing.
+ */
+export function resetDomainRouting(host: string): number {
+  const db = getDatabase();
+  const info = db.prepare(
+    `UPDATE domain_routing SET ${RESET_ROUTING_COLUMNS} WHERE domain = ?`,
+  ).run(host);
+  return info.changes;
+}
+
+/**
+ * Clear learned routing state for EVERY tracked host, returning the total rows
+ * changed. Like {@link resetDomainRouting}, throws on failure.
+ */
+export function resetAllDomainRouting(): number {
+  const db = getDatabase();
+  const info = db.prepare(
+    `UPDATE domain_routing SET ${RESET_ROUTING_COLUMNS}`,
+  ).run();
+  return info.changes;
+}
+
 export function getAllEmbeddings(modelId?: string): StoredEmbedding[] {
   try {
     const db = getDatabase();

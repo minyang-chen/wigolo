@@ -2,6 +2,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { getConfig } from '../config.js';
+import { searxngConfigured } from '../searxng/enabled.js';
 import { probeBrowser, type BrowserName } from '../fetch/browser-probe.js';
 import { checkPythonAvailable, bootstrapNativeSearxng, getBootstrapState } from '../searxng/bootstrap.js';
 import { checkVenvModule, venvInstallHint } from '../python-env.js';
@@ -9,6 +10,7 @@ import { isProcessAlive } from '../searxng/process.js';
 import { getRerankProvider } from '../providers/rerank-provider.js';
 import { runCommand } from './tui/run-command.js';
 import type { WarmupReporter } from './tui/reporter.js';
+import { noopReporter } from './tui/reporter.js';
 import { autoReporter } from './tui/reporter-auto.js';
 import { runVerify as runVerifyTui } from './tui/verify.js';
 import { sanitizeForTerminal } from './doctor.js';
@@ -47,8 +49,15 @@ async function detectDepsStrategy(): Promise<'root' | 'sudo' | 'skip'> {
   if (process.getuid?.() === 0) return 'root';
   // `sudo -n true` never prompts: -n makes sudo fail immediately (non-zero)
   // rather than ask for a password when credentials aren't cached.
-  const probe = await runCommand('sudo', ['-n', 'true'], { timeout: 5000 });
-  return probe.code === 0 ? 'sudo' : 'skip';
+  try {
+    const probe = await runCommand('sudo', ['-n', 'true'], { timeout: 5000 });
+    return probe.code === 0 ? 'sudo' : 'skip';
+  } catch {
+    // No sudo binary at all (spawn ENOENT — e.g. slim containers). runCommand
+    // REJECTS on spawn errors, so without this catch the whole browser install
+    // crashes before the launch smoke-test. Same verdict as a failed probe.
+    return 'skip';
+  }
 }
 
 /**
@@ -99,7 +108,7 @@ async function installLinuxDeps(
  *      (GH #116): the binary can be on disk yet fail to launch when system libs
  *      are missing. Only a successful launch reports `ok`.
  */
-async function installBrowser(
+export async function installBrowser(
   browser: BrowserName,
 ): Promise<{ ok: boolean; error?: string }> {
   const cli = resolveBundledPlaywrightCli();
@@ -153,6 +162,32 @@ export interface WarmupResult {
 }
 
 /**
+ * Map the internal WarmupResult to the machine-facing --json shape, renaming the
+ * implementation-library keys to capability names (`playwright` → `browserEngine`,
+ * `searxng` → `searchSidecar`) so the JSON contract carries no library names —
+ * the same rule the OpenAPI surface enforces. The internal type keeps its field
+ * names; the rename happens only at this serialization boundary. Optional fields
+ * are copied through unchanged.
+ */
+export function warmupResultToJson(result: WarmupResult): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    browserEngine: result.playwright,
+    searchSidecar: result.searxng,
+  };
+  if (result.playwrightError !== undefined) out.browserEngineError = result.playwrightError;
+  if (result.searxngError !== undefined) out.searchSidecarError = result.searxngError;
+  if (result.reranker !== undefined) out.reranker = result.reranker;
+  if (result.rerankerError !== undefined) out.rerankerError = result.rerankerError;
+  if (result.firefox !== undefined) out.firefox = result.firefox;
+  if (result.firefoxError !== undefined) out.firefoxError = result.firefoxError;
+  if (result.webkit !== undefined) out.webkit = result.webkit;
+  if (result.webkitError !== undefined) out.webkitError = result.webkitError;
+  if (result.embeddings !== undefined) out.embeddings = result.embeddings;
+  if (result.embeddingsError !== undefined) out.embeddingsError = result.embeddingsError;
+  return out;
+}
+
+/**
  * Format the opt-in local-model tier (`WIGOLO_LOCAL_LLM`) summary line for
  * warmup. Pure so the branching is asserted without a live server. warmup does
  * not install models — it only reports the resolved state. Component names
@@ -171,7 +206,7 @@ export function formatLocalLlmWarmupLine(state: {
   return `  Local model:   ${sanitizeForTerminal(state.localLlm)} — not reachable (synthesis falls back to keyless)`;
 }
 
-function wipeSearxngState(dataDir: string, reporter: WarmupReporter): void {
+export function wipeSearxngState(dataDir: string, reporter: WarmupReporter = noopReporter): void {
   const bootstrapLockPath = join(dataDir, 'bootstrap.lock');
   if (existsSync(bootstrapLockPath)) {
     try {
@@ -256,7 +291,7 @@ async function installWebkit(reporter: WarmupReporter): Promise<Pick<WarmupResul
   return { webkit: 'failed', webkitError: headline };
 }
 
-async function installEmbeddings(reporter: WarmupReporter): Promise<Pick<WarmupResult, 'embeddings' | 'embeddingsError'>> {
+export async function installEmbeddings(reporter: WarmupReporter = noopReporter): Promise<Pick<WarmupResult, 'embeddings' | 'embeddingsError'>> {
   reporter.start('embeddings', 'Downloading semantic embeddings model (fastembed)');
   try {
     const { FastembedEmbedProvider } = await import('../embedding/fastembed-provider.js');
@@ -329,7 +364,10 @@ export async function runWarmup(
   reporter?: WarmupReporter,
 ): Promise<WarmupResult> {
   const flagSet = new Set(flags);
-  const plain = flagSet.has('--plain');
+  const json = flagSet.has('--json');
+  // --json implies plain: a TUI progress reporter would emit ANSI to stderr;
+  // the machine result goes to stdout at the end, logs stay plain on stderr.
+  const plain = flagSet.has('--plain') || json;
   const reporterImpl = reporter ?? autoReporter({ plain });
 
   const config = getConfig();
@@ -342,14 +380,17 @@ export async function runWarmup(
 
   const pwResult = await installPlaywright(reporterImpl);
 
-  // The search engine (searxng) is an optional backend — `core` is the default
-  // search path and needs no native bootstrap. `--no-searxng` lets the
-  // Review/Toggles screen genuinely skip the searxng phase rather than only
-  // relabeling its status.
+  // D1: the search-engine sidecar is opt-in. The searxng phase runs only when
+  // explicitly requested (`--searxng`), or with `--all` when the sidecar is
+  // configured (searxng/hybrid backend or an external URL). A core-backend
+  // `--all` installs browser + models only, killing the D1↔D8 hint
+  // contradiction. `--no-searxng` is an ACTIVE suppressor and wins over both.
+  const searxngRequested =
+    flagSet.has('--searxng') || (flagSet.has('--all') && searxngConfigured(config));
   let searxngResult: Pick<WarmupResult, 'searxng' | 'searxngError'>;
-  if (flagSet.has('--no-searxng')) {
+  if (flagSet.has('--no-searxng') || !searxngRequested) {
     searxngResult = { searxng: 'skipped' };
-    reporterImpl.note('Search engine (searxng): skipped — using core backend');
+    reporterImpl.note('Search engine sidecar: skipped — using multi-engine core backend');
   } else {
     searxngResult = await runSearxngPhase(config.dataDir, reporterImpl);
   }
@@ -401,10 +442,20 @@ export async function runWarmup(
     : await resolveLocalModelTier({ localLlm, localLlmModel: config.localLlmModel ?? null });
   reporterImpl.note(formatLocalLlmWarmupLine({ localLlm, tier: localTier }));
 
-  if (flagSet.has('--verify') || flagSet.has('--all')) {
+  // `--all` implies a post-install verify, but a caller that runs its own
+  // checks afterwards (init does doctor cold checks) passes `--skip-verify` to
+  // avoid a redundant re-load of components the install phase already exercised.
+  if ((flagSet.has('--verify') || flagSet.has('--all')) && !flagSet.has('--skip-verify')) {
     await runVerify(config.dataDir, reporterImpl);
   }
 
   reporterImpl.finish();
+
+  if (json) {
+    // Machine shape on stdout (capability-named keys, no library names); the
+    // progress/summary lines stay on stderr.
+    process.stdout.write(`${JSON.stringify(warmupResultToJson(result))}\n`);
+  }
+
   return result;
 }

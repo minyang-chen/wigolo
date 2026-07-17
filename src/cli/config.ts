@@ -20,6 +20,7 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { getConfig } from '../config.js';
+import { isPackagedBinary, BINARY_TUI_UNAVAILABLE_MESSAGE } from '../util/packaged.js';
 import type { CategoryDef, FieldDef } from './tui/schema/types.js';
 
 const CONFIG_USAGE = [
@@ -32,6 +33,7 @@ const CONFIG_USAGE = [
   '  --force-wizard           Always launch the setup wizard (alias: wigolo init).',
   '                           Use the bare flag; --force-wizard=true is not accepted.',
   '  --plain, -p              Print current settings and exit (non-interactive)',
+  '  --json                   With --plain: print settings as a machine-readable JSON object',
   '  --storage                Print storage usage map',
   '  --cache-stats            Print cache statistics',
   '  --export [path]          Export config to file (secrets excluded)',
@@ -59,6 +61,7 @@ interface ConfigFlags {
   set: string | null;
   uninstall: boolean;
   yes: boolean;
+  json: boolean;
 }
 
 function parseConfigFlags(args: string[]): ConfigFlags {
@@ -75,6 +78,7 @@ function parseConfigFlags(args: string[]): ConfigFlags {
     set: null,
     uninstall: false,
     yes: false,
+    json: false,
   };
 
   let i = 0;
@@ -83,6 +87,7 @@ function parseConfigFlags(args: string[]): ConfigFlags {
     if (!arg) { i++; continue; }
 
     if (arg === '--plain' || arg === '-p') { flags.plain = true; i++; continue; }
+    if (arg === '--json') { flags.json = true; i++; continue; }
     if (arg === '--help' || arg === '-h') { flags.help = true; i++; continue; }
     if (arg === '--force-wizard') { flags.forceWizard = true; i++; continue; }
     if (arg === '--storage') { flags.storage = true; i++; continue; }
@@ -319,9 +324,15 @@ export async function runConfig(args: string[]): Promise<number> {
     process.env.CI === '1' ||
     process.env.GITHUB_ACTIONS === 'true';
 
-  const useInk = !flags.plain && isTTY && !isCI;
+  // --json forces headless machine output regardless of TTY.
+  const useInk = !flags.plain && !flags.json && isTTY && !isCI;
 
-  if (useInk) {
+  // The Ink TUI stack cannot boot inside the standalone binary (dependency-level
+  // top-level await). Headless-first: surface the actionable fallback, then fall
+  // through to the plain settings printout below instead of crashing.
+  if (useInk && isPackagedBinary()) {
+    process.stderr.write(`${BINARY_TUI_UNAVAILABLE_MESSAGE}\n`);
+  } else if (useInk) {
     return runInkConfig({
       isTTY,
       ci: isCI,
@@ -338,6 +349,25 @@ export async function runConfig(args: string[]): Promise<number> {
   const config = getConfig();
   const configPath = process.env.WIGOLO_CONFIG_PATH ?? join(homedir(), '.wigolo', 'config.json');
   const persisted = readPersistedConfig(configPath);
+
+  if (flags.json) {
+    // Machine-readable settings. Masked/secret fields are collapsed to a
+    // presence flag so --json never leaks a credential (mirrors --plain).
+    const settings: Record<string, unknown> = {};
+    for (const category of CATALOG) {
+      for (const field of category.fields) {
+        if (field.kind === 'readonly') continue;
+        const raw = persisted.settings[field.settingsPath];
+        if (field.kind === 'masked' || field.secret === true) {
+          settings[field.settingsPath] = raw === undefined || raw === '' ? null : '****';
+        } else {
+          settings[field.settingsPath] = raw ?? null;
+        }
+      }
+    }
+    process.stdout.write(`${JSON.stringify({ dataDir: config.dataDir, settings })}\n`);
+    return 0;
+  }
 
   process.stdout.write('Wigolo current settings\n');
   process.stdout.write('=======================\n\n');

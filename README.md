@@ -7,6 +7,7 @@ Local-first web intelligence over MCP — **no keys, no cloud, no metered bill.*
 <sub>works with&nbsp;&nbsp;**Claude Code · Cursor · Codex · Gemini CLI · VS Code · Windsurf · Zed · Antigravity**</sub>
 
 [![npm](https://img.shields.io/npm/v/wigolo?color=cb3837&logo=npm)](https://www.npmjs.com/package/wigolo)
+[![GitHub stars](https://img.shields.io/github/stars/KnockOutEZ/wigolo?style=flat&logo=github&color=e3b341)](https://github.com/KnockOutEZ/wigolo/stargazers)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-server-7c3aed)](https://modelcontextprotocol.io)
 [![license](https://img.shields.io/badge/license-AGPL--3.0-2563eb)](#license)
@@ -26,18 +27,37 @@ wigolo runs on your machine as an MCP server and gives an AI coding agent one du
 
 </div>
 
+## Momentum
+
+wigolo went public in early July 2026. It found its audience fast — **most of the stars below landed in a single 48-hour window.**
+
+<div align="center">
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="assets/promo/stars-dark.svg">
+<img alt="wigolo GitHub star growth — a flat line through mid-July, then a sharp climb as the project found its audience over one 48-hour window" src="assets/promo/stars.svg" width="880">
+</picture>
+
+<sub>Chart generated from the public GitHub star timeline. If it's still climbing when you read this, that's the point — <a href="https://github.com/KnockOutEZ/wigolo">add a ⭐</a>.</sub>
+
+</div>
+
 ## Quickstart
 
 Requires **Node ≥ 20** and ~1.5 GB of free disk. macOS, Linux, and Windows.
 
-One command installs the local engine (search, browser, on-device models), auto-wires it into your agent, and sets up the MCP connection:
+One command wires the local engine into your agent and sets up the MCP connection. `init` is **unattended by default** — no prompts, safe in scripts and CI — and does the **complete setup**: it downloads the browser engine and on-device models, runs a health check, and prints a clear per-component summary, so any setup problem surfaces right here, not silently on your agent's first call:
 
 ```bash
-npx wigolo init --non-interactive --agents=<your-agent>
+npx wigolo init --agents=<your-agent>
 ```
 
 - **`<your-agent>`** — one or more of `claude-code` · `cursor` · `codex` · `gemini-cli` · `vscode` · `windsurf` · `zed` · `antigravity` (comma-separated). wigolo writes the MCP config and instructions for you — nothing else to set up.
-- **Any other MCP-capable agent?** Omit `--agents` — the engine still installs headlessly, and you point your agent at wigolo's MCP server (`npx wigolo mcp`) yourself.
+- **Any other MCP-capable agent?** Omit `--agents` — init still sets up the engine, and you point your agent at wigolo's MCP server (`npx wigolo mcp`) yourself.
+- **Prefer a guided setup?** `--interactive` gives a plain-text prompt flow (pick your agents step by step); `--wizard` gives the richer terminal TUI. Both need a real terminal.
+- **Skipping `init`?** You can wire the MCP server directly (below) without ever running `init` — the browser engine and models then download automatically on first use.
+- **Fast / offline / CI setup?** Add `--no-warmup` to skip the downloads (components lazy-load on first use instead). *(`--non-interactive` still works — it's just the default now.)*
+- A component download failing (offline, disk, network block) never fails the setup: `init` reports what's not ready with the exact fix and still wires your agent — the component retries on first use.
 
 That's the whole setup — **search, fetch, crawl, extract, cache, and find-similar work with no API key.** Check it's healthy:
 
@@ -52,7 +72,7 @@ Not for you? `npx wigolo config --uninstall --yes` removes everything, cleanly.
 The `--agents` flag has a built-in installer for each agent listed above — but it can't cover every agent in the world. For **anything else — your own custom or in-house agent, or any MCP-capable client we don't wire automatically yet** — set wigolo up by hand: it's just another MCP server. Install the engine once, then register it:
 
 ```bash
-npx wigolo init --non-interactive        # engine only: models, browser, cache — no agent wiring
+npx wigolo init                          # unattended full setup, no agent wiring (add --no-warmup to defer downloads)
 ```
 
 Most clients use an `mcpServers` block in a JSON config file:
@@ -110,7 +130,7 @@ To enable answer synthesis (below) for a hand-wired agent, add the provider and 
 
 Setup is simple enough to hand off to an AI. Ask your coding agent (Claude Code, Cursor, …) — or any chat assistant (ChatGPT, Claude, Gemini) — to do it, and it can follow the steps above. Paste a prompt like:
 
-> Set up the **wigolo** MCP server for my agent. wigolo is a local-first MCP server installed with `npx wigolo init --non-interactive` (engine only — no API keys). Then register it in my agent's MCP config as an `mcpServers` entry `{ "command": "npx", "args": ["-y", "wigolo"] }`. Note the per-client differences: **VS Code** uses the `servers` key with `"type": "stdio"`; **Zed** uses `context_servers`; **Codex** uses TOML `[mcp_servers.wigolo]`; **Claude Code** uses the CLI `claude mcp add wigolo --scope user -- npx -y wigolo`. My agent is **<name>** and its MCP config is at **<path, or "wherever it registers MCP servers">**.
+> Set up the **wigolo** MCP server for my agent. wigolo is a local-first MCP server installed with `npx wigolo init` (engine only — no API keys). Then register it in my agent's MCP config as an `mcpServers` entry `{ "command": "npx", "args": ["-y", "wigolo"] }`. Note the per-client differences: **VS Code** uses the `servers` key with `"type": "stdio"`; **Zed** uses `context_servers`; **Codex** uses TOML `[mcp_servers.wigolo]`; **Claude Code** uses the CLI `claude mcp add wigolo --scope user -- npx -y wigolo`. My agent is **<name>** and its MCP config is at **<path, or "wherever it registers MCP servers">**.
 
 That prompt is self-contained, so even an assistant with no web access can act on it. If the assistant *can* browse, point it at this README (the **Manual MCP setup** section above has every client's exact config path) or the project's machine-readable **`llms.txt`** — both carry the full procedure, including the optional LLM-synthesis `env` below.
 
@@ -127,19 +147,221 @@ Any provider works — use `anthropic` + `ANTHROPIC_API_KEY`, `openai` + `OPENAI
 
 ### Run with Docker
 
-A prebuilt image runs the MCP server without installing Node yourself. It bundles the browser engine and on-device models, and the default command is the stdio MCP server.
+A prebuilt image runs the MCP server without installing Node yourself. The default command is the stdio MCP server. Two variants are published:
+
+- **`latest`** (default) — a slim image. The OS libraries for the browser engine are baked in, but the browser engine binary and the on-device models download on first use into the data volume. Smallest download; ideal for long-lived MCP setups.
+- **`latest-full`** — the browser engine binary is preinstalled at build time. Larger image; ideal for JS-render-heavy work or ephemeral `--rm` runs with no persistent volume.
+
+The data volume is **mandatory** in every run line — it holds the local cache, the on-device models, the browser engine binary, and your encrypted keys, and persists them across runs. Without it, every run re-downloads those components:
 
 ```bash
 docker run -i --rm -v wigolo-data:/data ghcr.io/knockoutez/wigolo
 ```
 
-The `-i` flag keeps stdin open for the MCP protocol, and the volume persists the local cache and models across runs (first run downloads the models). Wire it into Claude Code:
+The `-i` flag keeps stdin open for the MCP protocol. On first use the slim image downloads the browser engine binary and the models into the volume (a one-time few-hundred-MB download); later runs reuse them. To skip the first-use browser-engine download, use the full variant:
 
 ```bash
-claude mcp add wigolo --scope user -- docker run -i --rm -v wigolo-data:/data ghcr.io/knockoutez/wigolo
+docker run -i --rm -v wigolo-data:/data ghcr.io/knockoutez/wigolo:full
+```
+
+Wire either variant into Claude Code:
+
+```bash
+claude mcp add wigolo -- docker run -i --rm -v wigolo-data:/data ghcr.io/knockoutez/wigolo
 ```
 
 Any MCP client works the same way: set `command` to `docker` and `args` to the run flags above. The image is also on Docker Hub as `towhid69420/wigolo`.
+
+**HTTP serve mode.** For a remote or multi-client setup, run the HTTP daemon instead with the [`packaging/compose.serve.yml`](packaging/compose.serve.yml) snippet, which publishes port `3333` and adds a health check:
+
+```bash
+docker compose -f packaging/compose.serve.yml up
+```
+
+**Bind-mount caveat.** The container runs as an unprivileged user (uid/gid `1000`). A named volume (as above) just works. If you bind-mount a host directory instead (`-v "$PWD/wigolo-data:/data"`), that directory must be writable by uid `1000` or the container hits `EACCES` — either `chown 1000:1000` the host path first, or prefer the named volume.
+
+## REST API & self-host
+
+`wigolo serve` exposes a plain-JSON **REST API** alongside the MCP transport. Same process, same tools, two surfaces:
+
+- **REST** at `POST /v1/{tool}` — curl-able, no MCP client needed. Request body is the tool's input; the response is the tool's output as plain JSON.
+- **MCP** at `/mcp` (StreamableHTTP) and `/sse` — unchanged, for MCP clients.
+- **OpenAPI 3.1** at `GET /openapi.json` — the machine-readable contract.
+- **Discovery** at `GET /v1/tools` — `[{name, description, endpoint}]`.
+- **Health** at `GET /health` — always open, no auth.
+
+Start it on the default loopback address:
+
+```bash
+wigolo serve                       # 127.0.0.1:3333
+```
+
+### curl quickstart
+
+All ten tools, against a local instance. Request bodies match each tool's input schema (the same schema MCP serves and OpenAPI publishes):
+
+```bash
+BASE=http://127.0.0.1:3333/v1
+
+# search — multi-engine web search with ranked evidence
+curl -sX POST $BASE/search   -H 'Content-Type: application/json' \
+  -d '{"query":"local-first software","max_results":5}'
+
+# fetch — one URL to clean markdown + metadata
+curl -sX POST $BASE/fetch    -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com"}'
+
+# crawl — multi-page crawl (bfs / dfs / sitemap / map)
+curl -sX POST $BASE/crawl    -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com","strategy":"map","max_pages":20}'
+
+# cache — query everything already seen (or stats / clear)
+curl -sX POST $BASE/cache    -H 'Content-Type: application/json' \
+  -d '{"query":"local first"}'
+
+# extract — structured data (tables, metadata, JSON-LD, schema, brand)
+curl -sX POST $BASE/extract  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com","mode":"structured"}'
+
+# find_similar — related pages by URL or concept
+curl -sX POST $BASE/find_similar -H 'Content-Type: application/json' \
+  -d '{"concept":"local-first search engines","include_web":true}'
+
+# research — multi-step research brief
+curl -sX POST $BASE/research -H 'Content-Type: application/json' \
+  -d '{"question":"what is local-first software","depth":"quick"}'
+
+# agent — autonomous data gathering
+curl -sX POST $BASE/agent    -H 'Content-Type: application/json' \
+  -d '{"prompt":"summarize this page","urls":["https://example.com"],"max_pages":1}'
+
+# diff — compare two content snapshots
+curl -sX POST $BASE/diff     -H 'Content-Type: application/json' \
+  -d '{"old":{"markdown":"a\nb"},"new":{"markdown":"a\nc"},"output":"summary"}'
+
+# watch — register / list / check change-detection jobs
+curl -sX POST $BASE/watch    -H 'Content-Type: application/json' \
+  -d '{"action":"list"}'
+```
+
+The OpenAPI document lists every request field and the documented top-level response fields:
+
+```bash
+curl -s http://127.0.0.1:3333/openapi.json
+```
+
+### Authentication
+
+Auth is **optional on loopback, fail-closed off it**:
+
+- **Loopback bind, no token (default):** the API is open to local callers — a browser-`Origin` request is still refused, and only loopback `Host` headers are accepted.
+- **Non-loopback bind:** the server **refuses to start** unless you set an API token or explicitly opt into open access. This is the guard that keeps a `--host 0.0.0.0` deployment from being wide open by accident.
+- **Token set:** send `Authorization: Bearer <token>` on `/v1/*`, `/openapi.json`, the shim, and the MCP transport routes (`/mcp`, `/sse`). `/health` stays open.
+
+Set the token by env var, or via a file (the standard Docker/systemd secret pattern — keeps it out of the process environment):
+
+```bash
+export WIGOLO_API_TOKEN="a-long-random-secret"
+# or, file-based:
+export WIGOLO_API_TOKEN_FILE=/run/secrets/wigolo_token
+
+wigolo serve --host 0.0.0.0        # now requires the bearer token
+
+curl -sX POST http://your-host:3333/v1/fetch \
+  -H "Authorization: Bearer $WIGOLO_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com"}'
+```
+
+To bind to a public interface **without** a token (e.g. behind your own auth proxy), opt in explicitly with `--allow-unauthenticated` (or `WIGOLO_SERVE_ALLOW_UNAUTHENTICATED=1`).
+
+### Resource limits
+
+Serve mode adds transport-level bounds on top of each tool's own defaults (MCP behaviour is unchanged). Override via env var:
+
+| Env var | Default | What it bounds |
+|---------|---------|----------------|
+| `WIGOLO_SERVE_MAX_BODY_BYTES` | 1 MiB (5 MiB for `diff` / `extract`) | Request body size → `413` on overflow |
+| `WIGOLO_SERVE_TIMEOUT_SCALE` | `1` | Multiplier on per-route deadlines (60s search/cache/diff/find_similar, 120s fetch/extract/watch, 300s crawl/research/agent) → `504` when exceeded |
+| `WIGOLO_SERVE_MAX_CONCURRENCY` | `16` | In-flight `/v1` + shim requests → `429` when saturated |
+| `WIGOLO_SERVE_REQUEST_TIMEOUT_MS` | `120000` | Whole-request slow-loris guard (Node `requestTimeout`). `0` disables |
+| `WIGOLO_SERVE_HEADERS_TIMEOUT_MS` | `60000` | Header-receipt slow-loris guard (Node `headersTimeout`). `0` disables |
+| `WIGOLO_SERVE_ALLOW_LOCAL_TARGETS` | unset | Set to `1` to allow loopback/localhost **target URLs** under a non-loopback bind (blocked by default so a remote caller can't probe the box's own services) |
+
+Server-side parameter clamps (also published in OpenAPI so a generated SDK can't emit a rejected request): `crawl.max_pages` ≤ 200, `crawl.max_depth` ≤ 5, `agent.max_time_ms` ≤ 240000, `search` query array ≤ 10. An explicit over-cap value returns `400` with the cap in the hint.
+
+### Self-host in one command
+
+Docker (the API token makes a public bind safe; the volume persists cache, models, browser engine, and keys):
+
+```bash
+docker run -p 3333:3333 -v wigolo-data:/data \
+  -e WIGOLO_API_TOKEN="a-long-random-secret" \
+  ghcr.io/knockoutez/wigolo serve --host 0.0.0.0
+```
+
+Or use the [`packaging/compose.serve.yml`](packaging/compose.serve.yml) snippet (uncomment the token line before binding beyond loopback). Native:
+
+```bash
+WIGOLO_API_TOKEN="a-long-random-secret" wigolo serve --host 0.0.0.0
+```
+
+> **Token exposure note.** An env-var token is visible via `docker inspect` and `/proc/<pid>/environ` on the host. For hardened deployments use `WIGOLO_API_TOKEN_FILE` and mount the secret as a file (Docker/Kubernetes secrets, systemd `LoadCredential`) so it never enters the process environment.
+
+### Firecrawl-compat shim (experimental)
+
+An **experimental**, flag-gated shim mounts a lite subset of the Firecrawl v1 surface so a Firecrawl SDK can point its base URL at wigolo. Off by default; enable with `WIGOLO_FIRECRAWL_COMPAT=1`. It mounts at `/compat/firecrawl/v1` and covers **`scrape`, `search`, `map`, and `crawl`** only — batch, alternate formats (screenshot / changeTracking / rawHtml), the v2 surface, and webhooks are deliberately not implemented. Auth, limits, and target guarding apply identically to the shim.
+
+```bash
+WIGOLO_FIRECRAWL_COMPAT=1 wigolo serve
+curl -sX POST http://127.0.0.1:3333/compat/firecrawl/v1/scrape \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com"}'
+```
+
+## Install channels
+
+wigolo ships on five channels. **npm is the primary channel and works today** (`npx wigolo …` — the Quickstart above). The other four are packaging for release: their published artifacts (the `install.sh` URL, the Homebrew tap, and the container registries) go live **at first release** — see [`packaging/RELEASE-RUNBOOK.md`](packaging/RELEASE-RUNBOOK.md).
+
+Pick the channel that matches how you run things, then wire the MCP command from the last column. **Wire wigolo with the absolute command shown — never rely on a `PATH` export.** MCP clients launch the server as a child process and do not read your shell profile, so a bare `wigolo` on `PATH` is invisible to them; use `npx`, or the channel's absolute binary path.
+
+| Channel | Install | Upgrade | Uninstall | Recommended MCP command | Status |
+|---------|---------|---------|-----------|-------------------------|--------|
+| **npm** *(primary)* | `npm i -g wigolo` — or no install at all, just `npx wigolo` | `npm i -g wigolo@latest` (or nothing — `npx` always fetches latest) | `npx wigolo config --uninstall --yes` | `command: "npx"`, `args: ["-y", "wigolo"]` | **Verified** — macOS arm64; Windows covered by npm (CI matrix) |
+| **curl \| sh** | `curl -fsSL https://wigolo.dev/install.sh \| sh` | re-run the same `curl … \| sh` (idempotent; reuses the bundled runtime) | `sh install.sh --uninstall` (keeps your cache/config) | `command: "$HOME/.wigolo/bin/wigolo"`, `args: []` | **Verified** — macOS arm64; URL live at first release |
+| **Homebrew** | `brew install <org>/wigolo/wigolo` | `brew upgrade wigolo` | `brew uninstall wigolo` | `command: "$(brew --prefix)/bin/wigolo"`, `args: []` | **Verified** — macOS arm64; tap live at first release |
+| **Docker** | `docker pull ghcr.io/knockoutez/wigolo` (see [Run with Docker](#run-with-docker)) | `docker pull ghcr.io/knockoutez/wigolo` (re-pull `latest`) | `docker rmi ghcr.io/knockoutez/wigolo` (+ `docker volume rm wigolo-data` to drop data) | `command: "docker"`, `args: ["run", "-i", "--rm", "-v", "wigolo-data:/data", "ghcr.io/knockoutez/wigolo"]` | **Verified** — linux-docker (arm64 native, amd64 emulated); registry live at first release |
+| **Single-file binary** | download the release asset, `chmod +x wigolo` | download the new release asset (versionless `latest` URL) | `rm <path>/wigolo` (+ `rm -rf ~/.wigolo` to drop data) | `command: "/absolute/path/to/wigolo"`, `args: []` | macOS arm64 **verified**; linux-x64 / linux-arm64 / win-x64 **documented — unverified until CI**; **no Windows-native installer (documented gap — use npm on Windows)** |
+
+**One channel at a time.** All channels share one data directory (`~/.wigolo` by default, `/data` in Docker). Running two different wigolo versions against the same data dir is undefined — pick one channel per machine and let it own the data dir.
+
+**Component downloads (every channel).** A fresh package install pulls nothing extra on its own. Running `wigolo init` downloads the browser engine binary and the on-device models up front (a one-time few-hundred-MB download) and verifies them; if you skip `init` — or pass `init --no-warmup` — they download lazily **on first use** into the data dir instead. `wigolo warmup --all` pre-caches them anytime.
+
+### Channel caveats
+
+- **curl \| sh and binary are headless-first.** They run every tool and the flag-driven `wigolo init`, but the **interactive setup wizard is not available** in the standalone binary — for a guided setup, use npm (`npx wigolo init --wizard`).
+- **macOS binary signing.** Prebuilt macOS binaries are code-signed + notarized at release time and are safe to `curl`-download. If Gatekeeper still blocks a locally-copied binary (the quarantine attribute), clear it with `xattr -d com.apple.quarantine <binary>`. `curl` downloads set no quarantine attribute, so the curl channel is unaffected.
+- **Versionless URLs.** The `install.sh` URL and the binary release-asset URLs are unversioned — they always resolve to the latest release. Upgrading is re-running the same command.
+- **Docker data volume is mandatory.** The `-v wigolo-data:/data` mount holds the cache, models, browser engine binary, and encrypted keys. Without it, every run re-downloads them.
+
+## SDKs (pre-release)
+
+Thin, typed clients for the [REST API](#rest-api--self-host) live in this repo — **TypeScript** (`sdks/typescript/`: zero runtime dependencies, plain `fetch`, runs on Node ≥18 / Bun / Deno / edge runtimes) and **Python** (`sdks/python/`: standard library only, sync `Client` + `AsyncClient`, Python ≥3.10). One method per tool across all ten tools, env-driven configuration (`WIGOLO_BASE_URL`, `WIGOLO_API_TOKEN`), and an embedded local mode that finds or starts a local `wigolo serve` for you (`WIGOLO_LOCAL=1` in Python; `createLocalClient()` from the TypeScript local entry).
+
+Published as `wigolo-sdk` on npm and `wigolo` on PyPI — each SDK's README (`sdks/typescript/README.md`, `sdks/python/README.md`) has the install line and a runnable quickstart. Both SDKs are contract-locked to the server's live `/openapi.json` by drift tests (`npm run test:sdk:ts`, `npm run test:sdk:py`).
+
+## Framework integrations
+
+Drop wigolo's tools into the agent framework you already use — opt-in wrappers live in [`packages/`](packages/), each thin over the MCP server or the SDKs, so the full ten-tool surface (including cache, find_similar, research, and agent — the four most frameworks' web tools don't have) comes along.
+
+| Framework | Package | What you get |
+|-----------|---------|--------------|
+| **LangChain** | `packages/wigolo-langchain` | Each tool as a LangChain `BaseTool`, plus a `BaseRetriever` backed by search/find_similar for RAG chains. |
+| **CrewAI** | `packages/wigolo-crewai` | wigolo tools as CrewAI `BaseTool`s via `wigolo_tools()`, ready to hand to any crew. |
+| **LlamaIndex** | `packages/wigolo-llamaindex` | A `BaseReader` that loads fetched / crawled / searched pages as LlamaIndex documents. |
+| **Vercel AI SDK** | `packages/wigolo-ai-sdk` | Tool factories for `generateText` / `streamText` `tools`, edge-friendly. |
+
+Published as `wigolo-langchain`, `wigolo-crewai`, and `wigolo-llamaindex` on PyPI and `wigolo-ai-sdk` on npm; see each package's README for the import-and-call quickstart. They're opt-in extras — the core MCP server never depends on any framework.
 
 ## Tools
 
@@ -154,6 +376,22 @@ Any MCP client works the same way: set `command` to `docker` and `args` to the r
 | 🧠 `research` | Decompose a question → fan out sub-queries → fetch sources → synthesize a cited report (or a structured brief the host LLM writes from). |
 | 🤖 `agent` | Autonomous gather loop: plan → search → fetch → extract → synthesize, with a step log, time budget, and optional output schema. |
 | 🔁 `diff` + ⏱️ `watch` | See exactly what changed on a page since last visit; re-check on a schedule and deliver changes to a webhook. |
+
+## Agent skills
+
+wigolo ships an 11-pack skill catalog — one focused how-to per tool (search, fetch, crawl, extract, cache, find-similar, research, agent, diff, watch, plus an overview pack) — so your coding agent knows how to drive each tool well without you spelling it out. `wigolo init` installs them into every agent it wires up; you can also manage them directly:
+
+```bash
+wigolo skills add          # install into agents in the current project
+wigolo skills add --global # install into your per-user agent config instead
+wigolo skills list         # show what's installed and whether it's current
+wigolo skills remove       # remove the packs wigolo installed
+```
+
+- **Project vs. global.** Default is the project you're in; `--global` targets your home-level agent config.
+- **Idempotent.** Re-running `add` only rewrites what changed; already-current packs are left alone.
+- **Receipts, not guesswork.** Every install is recorded, so `remove` (and `wigolo uninstall`) never removes files it can't verify it installed — hand-edited skills are detected and never clobbered.
+- **Dry-run first.** Preview every create / update / skip before anything touches disk with `--dry-run`.
 
 ## Why it's different
 
@@ -255,7 +493,8 @@ flowchart TD
 
 - **Code beats model.** Deterministic work — canonicalization, rank fusion, dedup, schema matching, hashing — never touches an LLM. The model is reserved for judgment, opt-in, and capped per request. LLM-filled fields are checked against the source and nulled if absent, so hallucinations don't reach your output.
 - **Routing on observable signals.** The fetch ladder escalates to a real browser on what it *sees* — SPA markers, challenge bodies, thin content — not domain guesses. It learns per-domain and unlearns when a site stops needing it.
-- **Transparent, honest results.** Every result carries a score breakdown and a query-understanding block; degraded state is always surfaced, never hidden.
+- **Gets past most bot walls, keyless — and says so when it can't.** The ladder runs UA rotation on a bare `403`, TLS-fingerprint impersonation, a hardened headless browser, and it waits out interstitial challenges to capture the clearance cookie and reuse it per-domain. That clears the common JS-challenge sites with no keys and no third party. The honest ceiling: managed-challenge networks with IP reputation scoring (think the strictest job-board and review sites) still won't hand a datacenter or fresh residential IP a clearance — for those you opt into a proxy, a challenge-solver sidecar, or a hosted reader (all off by default). When a page stays blocked, wigolo returns a labeled `blocked_by_challenge` failure — never a challenge shell dressed up as content.
+- **Transparent, honest results.** Every result carries a score breakdown and a query-understanding block; degraded state is always surfaced, never hidden. wigolo self-tunes which fetch tier to try first per domain; `wigolo tune list` shows what it learned and `wigolo tune reset` clears it.
 
 <div align="center">
 
@@ -301,18 +540,24 @@ For repeated interactive use, run `wigolo serve` so the browser pool, embeddings
 | Command | What it does |
 |---------|--------------|
 | `wigolo` / `wigolo mcp` | Start the MCP stdio server (the default command). |
-| `wigolo init` | Set up wigolo: install components, wire into detected agents. `--non-interactive --agents=<csv> --provider=<name> --search=<backend>` for CI. |
-| `wigolo setup mcp` | Re-write just the MCP server entries, without the full wizard. |
-| `wigolo doctor` | Cold-start health check — no network fetches. |
-| `wigolo verify` | End-to-end smoke test (fetch, crawl, extract, search, rerank, embed). |
-| `wigolo serve` | HTTP daemon — keeps subsystems warm across multiple clients. |
-| `wigolo shell` | Interactive REPL (`--json` for piping). |
-| `wigolo config` | Settings TUI; or headless `--set K=V`, `--export`, `--import`, `--cleanup`, `--uninstall --yes`. |
-| `wigolo status` | Plain-text status summary. |
-| `wigolo health` | Ping a running daemon's `/health`. |
-| `wigolo backfill` | Embed cached pages that have no vector yet (`--batch-size`, `--dry-run`). |
-| `wigolo plugin add\|list\|remove` | Manage custom extractor / search-engine plugins. |
-| `wigolo uninstall` | Remove wigolo from agent configs (keeps your cache). |
+| `wigolo <tool> <args>` | Run any tool once, headlessly — `search`, `fetch`, `crawl`, `extract`, `cache`, `find-similar`, `research`, `agent`, `diff`, `watch`. Add `--json` for machine-readable output (results on stdout, logs on stderr, exit code 0/1); `--help` on each tool lists its flags. Example: `wigolo search "rust async runtimes" --limit 5 --json`. |
+| `wigolo init` | Full headless setup: wire into detected agents, persist settings, download the browser engine + models, run a health check, and print a per-component summary (so failures surface at setup, not on first agent call). `--agents=<csv> --provider=<name> --search=<backend>` (unattended by default — safe in CI); `--interactive` for plain-text prompts; `--no-warmup` to skip the downloads (lazy first-use instead); `--wizard` for the interactive TUI; `--json` for a machine-readable summary (components + doctor). |
+| `wigolo setup mcp` | Re-write just the MCP server entries, without the full wizard (`--json`). |
+| `wigolo doctor` | Cold-start health check — no network fetches. `--fix` auto-repairs known failures (re-download missing models, install the browser engine, clear stale sidecar state, reset engine breakers — including on a running daemon); `--json` for a machine-readable report. |
+| `wigolo verify` | End-to-end smoke test (fetch, crawl, extract, search, rerank, embed) (`--json`). |
+| `wigolo serve` | HTTP daemon — keeps subsystems warm across multiple clients. A taken port fails with an actionable message naming `--port`. |
+| `wigolo shell` | Interactive REPL with tab completion for every command and flag. Pipe a command script to `wigolo shell --json` and each command returns one line of JSON (NDJSON); a non-zero exit means at least one command failed — fully scriptable. |
+| `wigolo tune` | Inspect and reset what wigolo learned per domain — which fetch tier it prefers, challenge-clearance state, and backoff windows. `tune list` / `tune show <domain>` / `tune reset <domain>` / `tune reset --all`, all with `--json`. |
+| `wigolo config` | Settings TUI; or headless `--set K=V`, `--export`, `--import`, `--cleanup`, `--uninstall --yes` (`--json` with `--plain`). |
+| `wigolo status` | Plain-text status summary (`--json`). |
+| `wigolo health` | Ping a running daemon's `/health` (`--json`; exit code = status). |
+| `wigolo warmup` | Optional pre-cache of components for CI/offline: `--all` (browser + models), `--browser`, `--embeddings`, `--reranker`, `--searxng` (opt-in search sidecar). Nothing requires warmup — everything downloads on first use. `--json` for a machine-readable result. |
+| `wigolo backfill` | Embed cached pages that have no vector yet (`--batch-size`, `--dry-run`, `--json`). |
+| `wigolo plugin add\|list\|remove` | Manage custom extractor / search-engine plugins (`--json`). |
+| `wigolo auth` | Show configured browser-auth sources — CDP endpoint, Chrome profile, storage state (`--json`; never prints secret values). |
+| `wigolo uninstall` | Remove wigolo from agent configs (keeps your cache). `--yes` to skip confirmation, `--json` for a machine-readable plan+result. |
+
+Every command speaks `--json` for scripting and AI drivers (the exceptions are the `serve` daemon and the `mcp` protocol stream). Output on stdout is always a single machine-readable document; logs go to stderr; the exit code reflects success.
 
 </details>
 
@@ -477,7 +722,7 @@ Keys can also live in the OS keychain or an AES-encrypted file (`wigolo init` / 
 
 ## Beta & feedback
 
-wigolo is in **public beta**. Everything documented here works and is held to a 6,000-test suite — beta is about the polish bar, not stability. It stays beta until enough people have used it, kicked it, and starred it that calling it v1 means something.
+wigolo is in **public beta**. Everything documented here works and is held to a 7,600-test suite — beta is about the polish bar, not stability. It stays beta until enough people have used it, kicked it, and starred it that calling it v1 means something.
 
 That makes your feedback the whole game right now. Every report is read, usually the same day:
 
@@ -543,6 +788,10 @@ Grab wigolo wherever you manage packages or MCP servers:
 ## Contributing
 
 Bug reports, feature requests, and PRs are all welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. Keep tool handlers thin (business logic lives in the domain modules), add tests, and run the suite before opening a PR. wigolo also has a plugin system for custom extractors and search engines: `wigolo plugin add <git-url>`.
+
+The single-file binary channel (`npm run build:binary`) uses two build-only devDependencies — `@yao-pkg/pkg` (packages the CJS bundle into a standalone executable) and `esbuild` (bundles the dist to CommonJS). They are needed only for that build; the npm package and all runtime tools do not depend on them.
+
+The REST API validates request bodies against the tool schemas with `ajv` (a runtime dependency, dynamically imported only when the REST surface is first hit — it never loads in stdio MCP mode). The OpenAPI document is checked against the 3.1 meta-schema in tests via the `@seriousme/openapi-schema-validator` devDependency (dev-only).
 
 ## License
 

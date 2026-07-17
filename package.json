@@ -1,6 +1,6 @@
 {
   "name": "wigolo",
-  "version": "0.1.43-beta.2",
+  "version": "0.2.0",
   "mcpName": "io.github.KnockOutEZ/wigolo",
   "description": "Local-first web intelligence MCP server for AI coding agents",
   "type": "module",
@@ -22,7 +22,8 @@
   "files": [
     "dist",
     "assets/blocks",
-    "assets/skills",
+    "assets/legacy-skill-hashes.json",
+    "skills",
     "README.md",
     "LICENSE",
     "SKILL.md"
@@ -43,6 +44,7 @@
   ],
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
+    "build:binary": "npm run build && node packaging/binary/bundle.mjs && bash packaging/binary/pack.sh",
     "build:watch": "tsup --watch",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
@@ -51,6 +53,8 @@
     "test:integration": "vitest run tests/integration",
     "test:e2e": "vitest run tests/e2e",
     "test:perf": "vitest run --config vitest.perf.config.ts",
+    "test:sdk:ts": "npm --prefix sdks/typescript test",
+    "test:sdk:py": "node scripts/run-sdk-py-tests.mjs",
     "lint": "tsc --noEmit",
     "bench:extraction": "tsx benchmarks/extraction/runner.ts",
     "bench:search": "tsx benchmarks/search/runner.ts",
@@ -101,6 +105,7 @@
     "@inquirer/prompts": "^7.10.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
+    "ajv": "8.17.1",
     "better-sqlite3": "~12.9.0",
     "chalk": "^5.6.2",
     "cli-progress": "^3.12.0",
@@ -122,11 +127,14 @@
     "turndown": "^7.2.4"
   },
   "devDependencies": {
+    "@seriousme/openapi-schema-validator": "2.9.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cli-progress": "^3.11.6",
     "@types/node": "^25.6.0",
     "@types/react": "^18.3.28",
     "@types/turndown": "^5.0.6",
+    "@yao-pkg/pkg": "6.21.0",
+    "esbuild": "0.28.0",
     "ink-testing-library": "^4.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
