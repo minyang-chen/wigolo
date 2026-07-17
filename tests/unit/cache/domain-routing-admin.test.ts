@@ -51,7 +51,7 @@ describe('listDomainRouting — projection', () => {
     expect(row).toBeDefined();
     expect(row!.preferTlsImpersonation).toBe(true);
     expect(row!.tlsSuccessCount).toBe(1);
-    expect(row!.preferPlaywright).toBe(false);
+    expect(row!.preferBrowser).toBe(false);
     expect(row!.clearancePresent).toBe(true);
     expect(row!.clearanceExpiresAt).toBe('2026-08-01T00:00:00.000Z');
     expect(typeof row!.backoffUntil).toBe('string');
@@ -79,8 +79,12 @@ describe('listDomainRouting — projection', () => {
     expect(serialized).not.toContain('SUPERSECRETcookievalue123');
     expect(serialized).not.toContain(SEED_UA);
     expect(serialized).not.toContain('SecretUA');
+    // No implementation library name leaks into the machine projection either:
+    // the browser-preference key must use capability language, not "playwright".
+    expect(serialized).not.toMatch(/playwright/i);
     // The projection object must not carry the raw column names either.
     const row = rows.find((r) => r.domain === 'secret.test')!;
+    expect(row).not.toHaveProperty('preferPlaywright');
     expect(row).not.toHaveProperty('cfClearance');
     expect(row).not.toHaveProperty('clearanceUa');
     expect(row).not.toHaveProperty('cf_clearance');

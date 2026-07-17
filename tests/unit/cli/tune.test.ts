@@ -39,7 +39,7 @@ const SEED_UA = 'Mozilla/5.0 (X11; SecretUA/1.0)';
 function sampleRow(domain: string, overrides: Record<string, unknown> = {}) {
   return {
     domain,
-    preferPlaywright: false,
+    preferBrowser: false,
     preferTlsImpersonation: true,
     tlsSuccessCount: 3,
     httpFailures: 1,
@@ -99,11 +99,13 @@ describe('wigolo tune list', () => {
     expect(stdout.trim().split('\n')).toHaveLength(1);
   });
 
-  it('never leaks the clearance cookie value or UA in --json output', async () => {
+  it('never leaks the clearance cookie value, UA, or a library name in --json output', async () => {
     listDomainRouting.mockReturnValue([sampleRow('example.com')]);
     const { stdout } = await run(['list', '--json']);
     expect(stdout).not.toContain('SUPERSECRET');
     expect(stdout).not.toContain('SecretUA');
+    // Machine JSON is agent-facing: no implementation library names.
+    expect(stdout).not.toMatch(/playwright/i);
     void SEED_COOKIE; void SEED_UA;
   });
 
@@ -131,6 +133,10 @@ describe('wigolo tune show <domain>', () => {
     const doc = JSON.parse(stdout.trim());
     expect(doc.domain).toBe('example.com');
     expect(doc.preferTlsImpersonation).toBe(true);
+    // show --json must also stay free of library names.
+    expect(stdout).not.toMatch(/playwright/i);
+    expect(doc).not.toHaveProperty('preferPlaywright');
+    expect(doc.preferBrowser).toBe(false);
   });
 
   it('exits 1 for an unknown domain', async () => {

@@ -849,7 +849,8 @@ export function getBackoff(host: string): number | null {
  */
 export interface DomainRoutingSummary {
   domain: string;
-  preferPlaywright: boolean;
+  /** Whether wigolo prefers the browser engine for this domain. */
+  preferBrowser: boolean;
   preferTlsImpersonation: boolean;
   tlsSuccessCount: number;
   httpFailures: number;
@@ -887,7 +888,7 @@ export function listDomainRouting(): DomainRoutingSummary[] {
     ).all() as DomainRoutingSummaryRawRow[];
     return rows.map((row) => ({
       domain: row.domain,
-      preferPlaywright: (row.prefer_playwright ?? 0) === 1,
+      preferBrowser: (row.prefer_playwright ?? 0) === 1,
       preferTlsImpersonation: (row.prefer_tls_impersonation ?? 0) === 1,
       tlsSuccessCount: row.tls_success_count ?? 0,
       httpFailures: row.http_failures ?? 0,

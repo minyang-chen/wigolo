@@ -56,7 +56,7 @@ function renderTable(rows: DomainRoutingSummary[]): string {
   const body = rows.map((r) => [
     r.domain,
     fmtBool(r.preferTlsImpersonation),
-    fmtBool(r.preferPlaywright),
+    fmtBool(r.preferBrowser),
     String(r.tlsSuccessCount),
     String(r.httpFailures),
     r.backoffUntil ? 'active' : '-',
