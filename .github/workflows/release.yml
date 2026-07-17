@@ -117,7 +117,7 @@ jobs:
             fi
           }
           check_npm sdks/typescript
-          check_npm packages/wigolo-ai-sdk
+          check_npm packages/wigolo-vercel-ai-sdk
           check_py sdks/python
           check_py packages/wigolo-langchain
           check_py packages/wigolo-crewai
@@ -125,7 +125,7 @@ jobs:
           if [ "$fail" != "0" ]; then exit 1; fi
           echo "All sub-package versions agree on $TAG_VERSION"
 
-      # npm sub-packages: wigolo-sdk and wigolo-ai-sdk.
+      # npm sub-packages: wigolo-sdk and wigolo-vercel-ai-sdk.
       - name: Publish wigolo-sdk (npm)
         working-directory: sdks/typescript
         env:
@@ -140,19 +140,29 @@ jobs:
             npm publish --provenance --access public
           fi
 
-      - name: Publish wigolo-ai-sdk (npm)
-        working-directory: packages/wigolo-ai-sdk
+      - name: Publish wigolo-vercel-ai-sdk (npm)
+        working-directory: packages/wigolo-vercel-ai-sdk
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm install --no-audit --no-fund
           npm run build
           VER="$(node -p "require('./package.json').version")"
-          if npm view "wigolo-ai-sdk@$VER" version >/dev/null 2>&1; then
-            echo "wigolo-ai-sdk@$VER already on npm — skipping"
+          if npm view "wigolo-vercel-ai-sdk@$VER" version >/dev/null 2>&1; then
+            echo "wigolo-vercel-ai-sdk@$VER already on npm — skipping"
           else
             npm publish --provenance --access public
           fi
+
+      # One-time cleanup: this Vercel integration was briefly published as
+      # `wigolo-ai-sdk` (ambiguous next to the general `wigolo-sdk` client);
+      # it is renamed to `wigolo-vercel-ai-sdk`. Deprecate the old name so npm
+      # points installers at the new one. Best-effort + idempotent.
+      - name: Deprecate old wigolo-ai-sdk name
+        continue-on-error: true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm deprecate wigolo-ai-sdk "renamed to wigolo-vercel-ai-sdk" || true
 
       # PyPI packages: wigolo (SDK) + the three framework integrations.
       - name: Publish wigolo (PyPI)

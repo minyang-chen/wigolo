@@ -1,11 +1,11 @@
-# wigolo-ai-sdk
+# wigolo-vercel-ai-sdk
 
 Vercel AI SDK tools for [wigolo](https://github.com/KnockOutEZ/wigolo) — a local-first web search MCP server for AI coding agents.
 
 ## Installation
 
 ```bash
-npm install wigolo-ai-sdk ai zod
+npm install wigolo-vercel-ai-sdk ai zod
 ```
 
 Requires wigolo to be available via npx:
@@ -20,7 +20,7 @@ npm install -g wigolo
 ```typescript
 import { generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { WigoloMcpClient, createWigoloTools } from 'wigolo-ai-sdk';
+import { WigoloMcpClient, createWigoloTools } from 'wigolo-vercel-ai-sdk';
 
 const client = new WigoloMcpClient();
 await client.connect();
@@ -39,7 +39,7 @@ await client.disconnect();
 ### Individual Tools
 
 ```typescript
-import { WigoloMcpClient, createWebSearchTool, createWebFetchTool } from 'wigolo-ai-sdk';
+import { WigoloMcpClient, createWebSearchTool, createWebFetchTool } from 'wigolo-vercel-ai-sdk';
 
 const client = new WigoloMcpClient();
 await client.connect();
