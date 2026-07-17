@@ -92,10 +92,11 @@ export async function main(): Promise<void> {
       await exitCli(0);
       break;
 
-    case 'plugin':
-      await runPluginCommand(args);
-      await exitCli(0);
+    case 'plugin': {
+      const pluginCode = await runPluginCommand(args);
+      await exitCli(pluginCode);
       break;
+    }
 
     case 'init': {
       const initCode = await runInit(args);
