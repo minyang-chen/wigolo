@@ -684,12 +684,15 @@ export interface ResearchSource {
   relevance_score: number;
   fetched: boolean;
   fetch_error?: string;
+  /** Render-completeness label from the fetch (browser tier only). A `shell`
+   * level excludes the source from the evidence set before synthesis. */
+  content_completeness?: ContentCompleteness;
 }
 
 export interface RejectedSource {
   url: string;
-  reason: 'homepage' | 'serp' | 'social-promo' | 'low-content' | 'low-overlap' | 'negative-score';
-  stage: 'url-shape' | 'content-gate' | 'score-floor';
+  reason: 'homepage' | 'serp' | 'social-promo' | 'low-content' | 'low-overlap' | 'negative-score' | 'shell-content';
+  stage: 'url-shape' | 'content-gate' | 'score-floor' | 'shell-content';
 }
 
 export interface ResearchOutput {

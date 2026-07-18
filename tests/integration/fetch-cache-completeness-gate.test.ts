@@ -63,13 +63,6 @@ const SHELL: ContentCompleteness = { level: 'shell', reason: 'app_shell', settle
 const FULL: ContentCompleteness = { level: 'full', reason: 'content_verified', settled_by: 'probe' };
 const PARTIAL: ContentCompleteness = { level: 'partial', reason: 'never_settled', settled_by: 'budget' };
 
-// The extraction pipeline runs for real on the fresh path; stub it to a stable
-// output so these tests exercise the CACHE GATE, not extractor internals.
-vi.mock('../../src/extraction/pipeline.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/extraction/pipeline.js')>();
-  return { ...actual, extractContent: vi.fn(async () => makeExtraction()) };
-});
-
 describe('fetch cache gate — shell captures are cache-stale', () => {
   beforeEach(() => {
     resetConfig();
