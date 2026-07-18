@@ -87,13 +87,14 @@ function countBlocks(el: ProbeElement | null, selector: string): number {
 // surrounding chrome. This is what stops a nav-only shell reading as hydrated.
 function measureContentOutsideChrome(
   root: ProbeElement | null,
-): { textLen: number; pCount: number; codeCount: number } {
-  if (!root) return { textLen: 0, pCount: 0, codeCount: 0 };
+): { textLen: number; pCount: number; codeCount: number; rowCount: number } {
+  if (!root) return { textLen: 0, pCount: 0, codeCount: 0, rowCount: 0 };
   const inChrome = (el: ProbeElement): boolean =>
     typeof el.closest === 'function' && el.closest(NAV_CHROME_SELECTORS) !== null;
   let textLen = 0;
   let pCount = 0;
   let codeCount = 0;
+  let rowCount = 0;
   const tally = (selector: string, onMatch: (el: ProbeElement) => void): void => {
     let nodes: ArrayLike<ProbeElement>;
     try {
@@ -108,8 +109,10 @@ function measureContentOutsideChrome(
     }
   };
   // Mirror the semantic-landmark branches' counting (p separately, pre+code
-  // together) but only over blocks OUTSIDE site chrome, and sum their text so
-  // the threshold reflects genuine article prose, never nav/sidebar link text.
+  // together, tr separately) but only over blocks OUTSIDE site chrome, and sum
+  // their text so the threshold reflects genuine article prose, never
+  // nav/sidebar link text. Table rows count only alongside prose at the call
+  // site — see the app-root condition's `pCount >= 1 && …` gate.
   tally('p', (el) => {
     pCount += 1;
     textLen += measure(el);
@@ -118,7 +121,11 @@ function measureContentOutsideChrome(
     codeCount += 1;
     textLen += measure(el);
   });
-  return { textLen, pCount, codeCount };
+  tally('tr', (el) => {
+    rowCount += 1;
+    textLen += measure(el);
+  });
+  return { textLen, pCount, codeCount, rowCount };
 }
 
 // A hydrated landmark needs substantial text AND enough genuine content
@@ -147,8 +154,8 @@ export function isHydrated(doc: ProbeDocument): boolean {
   // sidebar) reads as hydrated before the body mounts and escalation never fires.
   const appRoot = doc.querySelector(SPA_APP_ROOT_SELECTORS);
   if (appRoot) {
-    const { textLen, pCount, codeCount } = measureContentOutsideChrome(appRoot);
-    if (textLen > 500 && (pCount >= 3 || codeCount >= 2 || pCount + codeCount >= 4)) return true;
+    const { textLen, pCount, codeCount, rowCount } = measureContentOutsideChrome(appRoot);
+    if (textLen > 500 && (pCount >= 3 || codeCount >= 2 || (pCount >= 1 && pCount + codeCount + rowCount >= 4))) return true;
   }
 
   // Paragraph fallback for blogs without semantic landmarks. Skip paragraphs
@@ -220,9 +227,9 @@ const HYDRATED_PREDICATE_BODY = `
     try { return el.querySelectorAll(sel).length; } catch { return 0; }
   };
   const measureContentOutsideChrome = (root) => {
-    if (!root) return { textLen: 0, pCount: 0, codeCount: 0 };
+    if (!root) return { textLen: 0, pCount: 0, codeCount: 0, rowCount: 0 };
     const inChrome = (el) => typeof el.closest === 'function' && el.closest(NAV_CHROME_SELECTORS) !== null;
-    let textLen = 0, pCount = 0, codeCount = 0;
+    let textLen = 0, pCount = 0, codeCount = 0, rowCount = 0;
     const tally = (sel, onMatch) => {
       let nodes;
       try { nodes = root.querySelectorAll(sel); } catch { return; }
@@ -234,7 +241,8 @@ const HYDRATED_PREDICATE_BODY = `
     };
     tally('p', (el) => { pCount += 1; textLen += measure(el); });
     tally('pre, code', (el) => { codeCount += 1; textLen += measure(el); });
-    return { textLen, pCount, codeCount };
+    tally('tr', (el) => { rowCount += 1; textLen += measure(el); });
+    return { textLen, pCount, codeCount, rowCount };
   };
 
   const hasBlocks = (el) => {
@@ -251,7 +259,7 @@ const HYDRATED_PREDICATE_BODY = `
   const appRoot = document.querySelector(SPA_APP_ROOT_SELECTORS);
   if (appRoot) {
     const m = measureContentOutsideChrome(appRoot);
-    if (m.textLen > 500 && (m.pCount >= 3 || m.codeCount >= 2 || m.pCount + m.codeCount >= 4)) return true;
+    if (m.textLen > 500 && (m.pCount >= 3 || m.codeCount >= 2 || (m.pCount >= 1 && m.pCount + m.codeCount + m.rowCount >= 4))) return true;
   }
 
   const paragraphs = document.querySelectorAll('p');

@@ -313,6 +313,27 @@ describe('classifyDom — completeness verdict primitives', () => {
       expect(isHydrated(doc as never)).toBe(false);
     });
   });
+
+  // App-root branch parity: a data-table article that mounts DIRECTLY into the
+  // SPA root (no <main>/<article> wrapper — common for direct-into-#root SPAs)
+  // must classify the same as one inside <main>. The prose-gated row credit +
+  // chrome exclusion now live in the app-root branch too.
+  it('data-table + intro <p> mounted DIRECTLY in <div id="root"> (no <main>) → hydrated', () => {
+    const rows = Array.from({ length: 30 }, () =>
+      '<tr><td>' + 'cell value data '.repeat(6) + '</td><td>' + 'more cell data '.repeat(6) + '</td></tr>').join('');
+    const p = '<p>' + 'intro paragraph text for the table. '.repeat(10) + '</p>';
+    withInnerText(`<html><body><div id="root">${p}<table>${rows}</table></div></body></html>`, (doc) => {
+      expect(isHydrated(doc as never)).toBe(true);
+    });
+  });
+
+  it('MUST-NOT-FIRE: nav-table (rows of <a>, no prose) DIRECTLY in <div id="root"> → NOT hydrated', () => {
+    const rows = Array.from({ length: 12 }, (_v, i) =>
+      `<tr><td><a href="/p${i}">navigation entry ${i} with descriptive link text here for length</a></td></tr>`).join('');
+    withInnerText(`<html><body><div id="root"><table>${rows}</table></div></body></html>`, (doc) => {
+      expect(isHydrated(doc as never)).toBe(false);
+    });
+  });
 });
 
 describe('DOM_VERDICT_SOURCE', () => {
@@ -328,4 +349,40 @@ describe('DOM_VERDICT_SOURCE', () => {
       expect(DOM_VERDICT_SOURCE).toContain(key);
     }
   });
+});
+
+// LOCKSTEP DRIFT GUARD: isHydrated (TS) and its inlined-string twin
+// HYDRATION_PROBE_SOURCE must stay logically identical, but the string is only
+// exercised indirectly (mocked page.evaluate), so nothing FAILS if they drift.
+// This predicate has now been edited several times (tr add, prose gate,
+// app-root parity). Run the REAL string predicate against a linkedom DOM (the
+// injected `document` param shadows the global inside the IIFE) and assert it
+// matches isHydrated for fixtures that exercise every touched branch.
+describe('isHydrated ⇄ HYDRATION_PROBE_SOURCE lockstep (string/TS parity)', () => {
+  const runStringPredicate = (doc: Document): boolean =>
+    // HYDRATION_PROBE_SOURCE is a `(()=>{...})()` IIFE; `return <source>` runs it.
+    new Function('document', `return ${HYDRATION_PROBE_SOURCE}`)(doc) as boolean;
+
+  const para = '<p>' + 'genuine article prose word '.repeat(30) + '</p>';
+  const tableRows = Array.from({ length: 30 }, () =>
+    '<tr><td>' + 'cell value data '.repeat(6) + '</td><td>' + 'more cell data '.repeat(6) + '</td></tr>').join('');
+  const navRows = Array.from({ length: 12 }, (_v, i) =>
+    `<tr><td><a href="/p${i}">navigation entry ${i} descriptive link text for length here</a></td></tr>`).join('');
+  const codeBlock = '<pre><code>' + 'const x = 1;\n'.repeat(40) + '</code></pre>';
+
+  const fixtures: Array<[string, string]> = [
+    ['data-table + prose in <main>', `<html><body><main><p>${'intro text here. '.repeat(20)}</p><table>${tableRows}</table></main></body></html>`],
+    ['data-table + prose direct in #root', `<html><body><div id="root"><p>${'intro text here. '.repeat(20)}</p><table>${tableRows}</table></div></body></html>`],
+    ['nav-table shell, no prose', `<html><body><main><table>${navRows}</table></main></body></html>`],
+    ['plain 3-paragraph article', `<html><body><article>${para}${para}${para}</article></body></html>`],
+    ['code-heavy docs page', `<html><body><main><p>intro paragraph about the API here for context.</p>${codeBlock}${codeBlock}</main></body></html>`],
+  ];
+
+  for (const [name, html] of fixtures) {
+    it(`string predicate matches isHydrated: ${name}`, () => {
+      withInnerText(html, (doc) => {
+        expect(runStringPredicate(doc)).toBe(isHydrated(doc as never));
+      });
+    });
+  }
 });
