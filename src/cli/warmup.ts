@@ -151,9 +151,10 @@ export function sanitizeBrowserInstallError(
 }
 
 // Browser binaries are 90–170 MB each. 180s was too tight for slow/throttled
-// links (a field driver of masked install "failures"); 300s covers ~1 Mbps, and
-// one retry absorbs a transient reset/timeout without turning a blip into a hard
-// failure. A good connection installs in seconds and never retries.
+// links (a field driver of masked install "failures"); 300s covers ~1 Mbps. One
+// retry absorbs a transient reset/error — but NOT a timeout: a timeout already
+// spent the full budget, and a fresh (non-resuming) re-download would just time
+// out again, so we fail fast with the mirror hint instead of doubling the wait.
 const BROWSER_INSTALL_TIMEOUT_MS = 300_000;
 const BROWSER_INSTALL_ATTEMPTS = 2;
 
@@ -164,7 +165,7 @@ export async function installBrowser(
   let r = await runCommand(process.execPath, [cli, 'install', browser], {
     timeout: BROWSER_INSTALL_TIMEOUT_MS,
   });
-  for (let attempt = 2; r.code !== 0 && attempt <= BROWSER_INSTALL_ATTEMPTS; attempt++) {
+  for (let attempt = 2; r.code !== 0 && !r.timedOut && attempt <= BROWSER_INSTALL_ATTEMPTS; attempt++) {
     r = await runCommand(process.execPath, [cli, 'install', browser], {
       timeout: BROWSER_INSTALL_TIMEOUT_MS,
     });

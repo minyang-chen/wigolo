@@ -575,6 +575,28 @@ describe('installBrowser hardening (3a: slow/flaky network resilience)', () => {
     expect(msg).toMatch(/PLAYWRIGHT_DOWNLOAD_HOST|mirror/i);
     expect(msg).not.toContain('■');
   });
+
+  it('does NOT retry a timed-out install (a timeout already spent the full budget)', async () => {
+    // WHY (review): retrying a timeout re-downloads from zero and almost always
+    // times out again, doubling the wait. Fail fast with the mirror hint instead.
+    vi.mocked(runCommand).mockResolvedValue({ code: -1, stdout: '', stderr: '', timedOut: true });
+
+    const r = await installBrowser('chromium');
+
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/timed out/i);
+    expect(installCallsOf('chromium').length).toBe(1);
+  });
+
+  it('gives up after both attempts fail and surfaces the real error', async () => {
+    vi.mocked(runCommand).mockResolvedValue(failWith('boom'));
+
+    const r = await installBrowser('chromium');
+
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('boom');
+    expect(installCallsOf('chromium').length).toBe(2);
+  });
 });
 
 describe('runWarmup browser-failure surfacing (A1)', () => {
