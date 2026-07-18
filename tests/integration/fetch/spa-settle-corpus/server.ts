@@ -22,6 +22,7 @@ export function startCorpusServer(): Promise<CorpusServer> {
         : route === '/nav-shell' ? fx.navShellForever()
         : route === '/never-idle' ? fx.neverNetworkidle()
         : route === '/instant' ? fx.instantStatic()
+        // reserved: challenge_shell label is asserted at the browser-pool unit lane (Task 5), not here.
         : route === '/challenge' ? fx.challengeShell()
         : route === '/code-docs' ? fx.codeHeavyDocs()
         : route === '/ticker' ? fx.tickerPage()

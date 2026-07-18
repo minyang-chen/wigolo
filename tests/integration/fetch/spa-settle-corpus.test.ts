@@ -5,6 +5,7 @@ import { startCorpusServer, type CorpusServer } from './spa-settle-corpus/server
 import { ARTICLE_MARKER, NAV_MARKER } from './spa-settle-corpus/fixtures.js';
 
 // Wall-clock bounds: tight locally, generous on CI (loaded runners).
+// Module-scope on purpose: tests/setup.ts deletes CI inside each test's beforeEach, so this must read the real CI env at import time.
 const SLACK_MS = process.env.CI ? 6000 : 1500;
 
 let srv: CorpusServer;
@@ -40,7 +41,7 @@ describe('SPA settle corpus (real browser)', () => {
   // CURRENT BUG: with PLAYWRIGHT_NAV_TIMEOUT_MS=10000 the current hydration
   // budget is min(8000, max(1500, 10000/4)) = 2500ms — probe gives up at ~3s
   // while the article mounts at 5s. After settle.ts the 6s shared cap covers it.
-  it.fails('captures article on slow delayed-mount SPA (5000ms) within budget', async () => {
+  it('captures article on slow delayed-mount SPA (5000ms) within budget', async () => {
     const r = await pool.fetchWithBrowser(`${srv.baseUrl}/delayed?ms=5000`);
     expect(r.html).toContain(ARTICLE_MARKER);
   }, 30000);
@@ -57,7 +58,7 @@ describe('SPA settle corpus (real browser)', () => {
   // CURRENT BUG (mode B): networkidle never fires → burns the full load timeout.
   // Current behavior is *bounded* by loadTimeoutMs but wastes it entirely; after
   // settle.ts, stability exits in ~1s. Tight bound expected to FAIL today.
-  it.fails('never-networkidle page with instant article settles fast', async () => {
+  it('never-networkidle page with instant article settles fast', async () => {
     const t0 = Date.now();
     const r = await pool.fetchWithBrowser(`${srv.baseUrl}/never-idle`);
     const elapsed = Date.now() - t0;

@@ -1,5 +1,5 @@
 // Synthetic SPA corpus. Each fixture encodes ONE failure class from the spec.
-// ARTICLE_MARKER must appear in captured markdown iff the article mounted.
+// ARTICLE_MARKER must appear in the captured page content iff the article mounted.
 
 export const ARTICLE_MARKER = 'CORPUS-ARTICLE-BODY-9317';
 export const NAV_MARKER = 'CORPUS-NAV-LINK-4402';
