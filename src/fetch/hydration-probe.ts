@@ -122,16 +122,18 @@ function measureContentOutsideChrome(
 }
 
 // A hydrated landmark needs substantial text AND enough genuine content
-// blocks. Data-table articles (pricing grids, API tables) carry their body in
-// <tr> rows with few <p>s, so rows count toward the block threshold alongside
-// prose <p> and code <pre>/<code> — a nav shell uses <a>/<li>, never <tr>, so
-// this can't make a nav-only shell read as hydrated.
+// blocks. Data-table articles (pricing grids, API tables) carry body in <tr>
+// rows — but rows ONLY count toward the threshold when at least one prose <p>
+// is co-present. A real data-table article has surrounding paragraphs; a
+// nav-as-table or a "Loading…" skeleton table has rows but no prose, so it must
+// NOT read as hydrated (that would leak a shell as content in the render gate).
+// There is deliberately no standalone row-count disjunct.
 function hasContentBlocks(el: ProbeElement | null): boolean {
   if (measure(el) <= 500) return false;
   const pCount = countBlocks(el, 'p');
   const codeCount = countBlocks(el, 'pre, code');
   const rowCount = countBlocks(el, 'tr');
-  return pCount >= 3 || codeCount >= 2 || rowCount >= 3 || pCount + codeCount + rowCount >= 4;
+  return pCount >= 3 || codeCount >= 2 || (pCount >= 1 && pCount + codeCount + rowCount >= 4);
 }
 
 export function isHydrated(doc: ProbeDocument): boolean {
@@ -240,7 +242,7 @@ const HYDRATED_PREDICATE_BODY = `
     const p = countBlocks(el, 'p');
     const c = countBlocks(el, 'pre, code');
     const r = countBlocks(el, 'tr');
-    return p >= 3 || c >= 2 || r >= 3 || p + c + r >= 4;
+    return p >= 3 || c >= 2 || (p >= 1 && p + c + r >= 4);
   };
   if (hasBlocks(document.querySelector('article'))) return true;
   if (hasBlocks(document.querySelector('main'))) return true;

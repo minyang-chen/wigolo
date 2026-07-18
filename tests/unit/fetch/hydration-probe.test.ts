@@ -270,6 +270,49 @@ describe('classifyDom — completeness verdict primitives', () => {
       expect(classifyDom(doc as never).hasContent).toBe(true);
     });
   });
+
+  // MUST-NOT-FIRE: table rows only count toward hydration when co-present PROSE
+  // exists. A table with rows but NO <p> is a nav-as-table or a still-mounting
+  // skeleton — it must NEVER read as hydrated, or the render gate would leak a
+  // shell as content. These pin the over-fire fix (dropped the standalone
+  // row-count disjunct; rows require p>=1).
+  it('MUST-NOT-FIRE: <main><table> of link rows (nav-as-table, no prose) → NOT hydrated', () => {
+    const rows = Array.from({ length: 10 }, (_v, i) =>
+      `<tr><td><a href="/p${i}">navigation link label number ${i} with some descriptive text</a></td></tr>`).join('');
+    withInnerText(`<html><body><main><table>${rows}</table></main></body></html>`, (doc) => {
+      expect(isHydrated(doc as never)).toBe(false);
+    });
+  });
+
+  it('MUST-NOT-FIRE: <main><table> of "Loading…" skeleton rows (no prose) → NOT hydrated', () => {
+    const rows = Array.from({ length: 8 }, () =>
+      '<tr><td>Loading placeholder row content that occupies space while mounting</td></tr>').join('');
+    withInnerText(`<html><body><main><table>${rows}</table></main></body></html>`, (doc) => {
+      expect(isHydrated(doc as never)).toBe(false);
+    });
+  });
+
+  it('MUST-NOT-FIRE: table-nav inside <div id="root"><main> (no prose) → NOT hydrated', () => {
+    const rows = Array.from({ length: 10 }, (_v, i) =>
+      `<tr><td><a href="/s${i}">section navigation entry ${i} with descriptive link text here</a></td></tr>`).join('');
+    withInnerText(
+      `<html><body><div id="root"><main><table>${rows}</table></main></div></body></html>`,
+      (doc) => {
+        expect(isHydrated(doc as never)).toBe(false);
+      },
+    );
+  });
+
+  it('BOUNDARY: a bare data-table with ZERO prose → NOT hydrated (conservative)', () => {
+    // No prose co-signal, so the row credit does not apply. A pure table with
+    // no surrounding paragraphs settles via stability and, if unrecognized,
+    // labels shell — this test documents that intended boundary.
+    const rows = Array.from({ length: 20 }, () =>
+      '<tr><td>' + 'cell value data '.repeat(6) + '</td><td>' + 'more cell data '.repeat(6) + '</td></tr>').join('');
+    withInnerText(`<html><body><main><table>${rows}</table></main></body></html>`, (doc) => {
+      expect(isHydrated(doc as never)).toBe(false);
+    });
+  });
 });
 
 describe('DOM_VERDICT_SOURCE', () => {
