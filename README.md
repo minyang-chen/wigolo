@@ -52,16 +52,16 @@ npx wigolo doctor
 
 Not for you? `npx wigolo config --uninstall --yes` removes everything, cleanly. You can also paste the [installation guide](docs/installation.md) at any AI assistant and let it do the setup — it's written to be self-contained.
 
-### Optional — enable answer synthesis
+### Recommended — a free key makes `research` & `agent` shine
 
-`research`, `agent`, and `search format=answer` use an LLM to *write* the final answer. Set a provider and its key (shell env or your agent's MCP `env` block):
+Search, fetch, crawl, extract, cache, and find-similar are **fully keyless**. But `research`, `agent`, and `search format=answer` use an LLM to *write* the synthesized, cited answer — without one they hand back a raw brief and evidence for your agent to assemble, which is a much thinner experience. **A free Gemini key is all it takes**, and it's the single biggest quality upgrade you can make:
 
 ```bash
 export WIGOLO_LLM_PROVIDER=gemini
-export GEMINI_API_KEY=<your-key>      # free tier is plenty — or anthropic / openai / groq
+export GEMINI_API_KEY=<free-key>      # grab one at aistudio.google.com/apikey — the free tier is plenty
 ```
 
-To stay fully local and keyless, set `WIGOLO_LLM_PROVIDER=ollama` (or any local server URL). Everything else about synthesis, providers, and the keyless local-model ladder is in the [configuration guide](docs/configuration.md).
+Any provider works (`anthropic` · `openai` · `groq`), or stay fully local and keyless with `WIGOLO_LLM_PROVIDER=ollama` (or any OpenAI-compatible URL). Set it in your shell or your agent's MCP `env` block. Providers, models, and the keyless local-model ladder: [configuration guide](docs/configuration.md).
 
 ## What your agent gets back
 
@@ -99,6 +99,21 @@ Weak results get flagged as junk by wigolo's own scorer, failed engines are repo
 | 🔁 `diff` + ⏱️ `watch` | See exactly what changed on a page since last visit; re-check on demand and deliver changes to a webhook. |
 
 Every tool also runs from the terminal (`wigolo search "…" --json`), from an interactive shell with NDJSON piping (`wigolo shell`), over REST, and through the SDKs — [CLI reference](docs/cli.md).
+
+### What that actually lets you do
+
+Each tool goes well past its one-liner. A sampler — every line links to the guide and, where there's one, a runnable example:
+
+- **Search that fans out** — pass a query **array** for parallel breadth, scope to `include_domains`, bound by `time_range`/recency, exact-phrase match, choose a depth tier, even image results. → [guide](docs/tools.md#search) · [example](examples/one-shot-cli)
+- **Fetch almost anything** — JS-rendered SPAs, PDFs, a single heading `section`, authenticated pages (via a browser profile or remote browser), or drive the page with `actions` (click / type / scroll / screenshot). → [guide](docs/tools.md#fetch)
+- **Crawl a whole site** — sitemap, BFS, DFS, or map-only; robots.txt-respecting, per-domain rate-limited, boilerplate-deduped. → [guide](docs/tools.md#crawl)
+- **Extract structure** — tables, JSON-LD, metadata, brand assets, named schemas (Article / Recipe / Product / …), or your own JSON Schema. → [guide](docs/tools.md#extract)
+- **A memory that compounds** — every page is cached; re-query by keyword or meaning, instantly and offline; detect what changed since last visit. → [guide](docs/tools.md#cache) · [example](examples/watch-changelog-webhook)
+- **Research & autonomous gather** — decompose a question into a cited brief, or turn `agent` loose to plan → fetch → extract → synthesize against a JSON Schema and a time budget. → [guide](docs/tools.md#research) · [example](examples/sdk-python-agent)
+- **Watch & diff** — monitor a URL, get a change report, deliver it to a webhook. → [guide](docs/tools.md#watch) · [example](examples/watch-changelog-webhook)
+- **Drive it your way** — one-shot CLI, an NDJSON shell for pipelines, REST, SDKs, or as skills your agent installs. → [CLI & shell](docs/cli.md) · [example](examples/shell-ndjson-pipeline)
+- **Extend it** — add a search engine or a site extractor as a plugin in ~100 lines. → [plugins](docs/plugins.md) · [example](examples/plugin-search-engine)
+- **Tune & inspect** — `wigolo tune` shows what it learned per domain (which fetch tier, challenge clearances, backoff); `doctor` / `verify` health-check every component. → [CLI](docs/cli.md) · [troubleshooting](docs/troubleshooting.md)
 
 ## Why it's different
 
