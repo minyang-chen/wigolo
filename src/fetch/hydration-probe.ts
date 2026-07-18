@@ -253,13 +253,6 @@ const HYDRATED_PREDICATE_BODY = `
 // inline the constants so the browser context doesn't need our module graph.
 export const HYDRATION_PROBE_SOURCE = `(() => {${HYDRATED_PREDICATE_BODY}})()`;
 
-// Source for the app-shell-only re-poll. Resolves true once the body has
-// mounted (so waitForFunction can re-poll for it after a longer budget). We
-// reuse the hydrated predicate directly — "wait until hydrated" is the gate
-// regardless of whether the first wait timed out. Kept separate from
-// HYDRATION_PROBE_SOURCE only for call-site clarity.
-export const HYDRATED_WAIT_SOURCE = HYDRATION_PROBE_SOURCE;
-
 // Source that reports whether the current DOM is an app-shell with no body
 // yet — an SPA root exists but the hydrated predicate is unsatisfied. Used
 // (via page.evaluate) to decide whether a probe timeout warrants escalation.
@@ -270,28 +263,31 @@ export const APP_SHELL_ONLY_SOURCE = `(() => {
   return document.querySelector(SPA_APP_ROOT_SELECTORS) !== null;
 })()`;
 
-// Content metrics snapshot for the stability poller: text length OUTSIDE nav
-// chrome + content node count. Cheap enough to run every poll tick.
+// Content metrics snapshot for the stability poller: text length + node count
+// of article content OUTSIDE nav chrome. Cheap enough to run every poll tick.
 //
-// textLen measures body text with the nav chrome text subtracted, NOT raw
-// body.innerText — a nav-only SPA shell (react.dev's sidebar, 40 stable link
-// descriptions) otherwise reads as a large STABLE textLen, and the stability
-// gate locks onto it before the article body mounts. Netting out chrome makes a
-// pure shell read textLen≈0, which isStable() (ratio guard on prev.textLen>0)
-// never accepts as stable, so only the probe or the budget can end that wait.
+// Both metrics are derived from the SAME set of LEAF content blocks (no
+// article/main containers, which would double-count their own children), each
+// excluded via per-element closest() if it lives inside nav chrome. A nav-only
+// SPA shell (react.dev's sidebar, 40 stable link descriptions) therefore reads
+// textLen≈0 — never a large STABLE value the stability gate could lock onto
+// before the article body mounts. Per-element exclusion (not body-minus-Σchrome)
+// avoids double-subtracting NESTED chrome (e.g. an <aside class="sidebar"> and
+// its child <nav>), which would otherwise drive a real article's textLen to 0
+// and mask the stability fallback. isStable()'s ratio guard (prev.textLen>0)
+// rejects a textLen≈0 shell as unstable, so only the probe or the budget ends
+// that wait.
 export const CONTENT_METRICS_SOURCE = `(() => {
   const NAV_CHROME_SELECTORS = ${JSON.stringify(NAV_CHROME_SELECTORS)};
+  const inChrome = (el) => typeof el.closest === 'function' && el.closest(NAV_CHROME_SELECTORS) !== null;
+  let textLen = 0;
   let nodes = 0;
-  const els = document.querySelectorAll('p, pre, code, article, main, h1, h2, h3, li, td');
-  for (let i = 0; i < els.length; i++) {
-    const el = els[i];
-    if (typeof el.closest === 'function' && el.closest(NAV_CHROME_SELECTORS)) continue;
+  const blocks = document.querySelectorAll('p, pre, code, li, h1, h2, h3, td');
+  for (let i = 0; i < blocks.length; i++) {
+    const el = blocks[i];
+    if (inChrome(el)) continue;
     nodes += 1;
+    textLen += ((el.innerText || '')).length;
   }
-  const bodyText = (document.body && document.body.innerText ? document.body.innerText : '').trim().length;
-  let chromeText = 0;
-  const chrome = document.querySelectorAll(NAV_CHROME_SELECTORS);
-  for (let i = 0; i < chrome.length; i++) chromeText += ((chrome[i].innerText || '')).length;
-  const textLen = Math.max(0, bodyText - chromeText);
   return { textLen, nodes };
 })()`;
