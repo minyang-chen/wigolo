@@ -75,15 +75,26 @@ jobs:
   # genuinely clean machine every time (this is what re-exercises the
   # recursive-mkdir and corrupt-archive download-path fixes on every PR).
   clean-machine-smoke:
-    name: clean-machine smoke (${{ matrix.os }})
+    name: clean-machine smoke (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
+    # linux-arm64 is non-blocking: its native embedding tokenizer is still being
+    # validated on real ARM hardware, so it reports without gating a merge.
+    continue-on-error: ${{ matrix.os == 'ubuntu-22.04-arm' }}
     # Bound the job: a stuck browser/model download on a bad runner should fail
     # in minutes, not ride the 6h default.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        # Every desktop OS across the supported Node range. 12.9.0 ships prebuilt
+        # native binaries for all of these (win32-x64 + darwin/linux arm64 across
+        # Node 20/22/24), so npm ci never falls back to a source compile.
         os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['20', '22', '24']
+        include:
+          # Extra linux-arm64 coverage on one Node version (non-blocking above).
+          - os: ubuntu-22.04-arm
+            node: '20'
     env:
       # Add GEMINI_API_KEY as a repo secret to exercise the
       # cloud-LLM path. Absent (e.g. on fork PRs) → the LLM step is skipped and
@@ -94,7 +105,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install + build
@@ -131,7 +142,7 @@ jobs:
           node -e "const t=require('fs').readFileSync('search.json','utf8'); JSON.parse(t); if (t.length < 50){ console.error('search/rerank produced trivial output'); process.exit(1) } console.log('search + rerank + sqlite OK')"
 
       - name: cloud-LLM synthesis (Gemini) — proves the LLM path + key wiring
-        if: matrix.os == 'ubuntu-latest' && env.GEMINI_API_KEY != ''
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '20' && env.GEMINI_API_KEY != ''
         shell: bash
         run: |
           wigolo search 'what is the capital of France' --format answer --json > ans.json
