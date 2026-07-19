@@ -51,7 +51,7 @@ function labelingRouter(): SmartRouter {
         html: '<html><body><p>content</p></body></html>',
         contentType: 'text/html',
         statusCode: 200,
-        method: completeness ? ('playwright' as const) : ('http' as const),
+        method: completeness ? ('browser' as const) : ('http' as const),
         headers: {},
         ...(completeness ? { contentCompleteness: completeness } : {}),
       };
