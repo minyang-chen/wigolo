@@ -246,7 +246,14 @@ One note for self-hosters: some challenge-protected sites score IP reputation, s
 
 <div align="center">
 
-<sub>📈 <a href="https://www.star-history.com/#KnockOutEZ/wigolo&Date">Live star-history chart</a> · <a href="https://github.com/KnockOutEZ/wigolo">add a ⭐</a> if wigolo is useful to you.</sub>
+<a href="https://www.star-history.com/#KnockOutEZ/wigolo&Date">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/KnockOutEZ/wigolo/star-chart/star-history-dark.svg">
+<img alt="wigolo GitHub stars over time" src="https://raw.githubusercontent.com/KnockOutEZ/wigolo/star-chart/star-history.svg" width="720">
+</picture>
+</a>
+
+<sub>Refreshed daily from the GitHub API. <a href="https://github.com/KnockOutEZ/wigolo">Add a ⭐</a> if wigolo is useful to you.</sub>
 
 </div>
 
