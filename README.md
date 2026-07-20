@@ -36,17 +36,19 @@ wigolo gives an AI agent one surface for everything web-related: **search, fetch
 ## Quickstart
 
 ```bash
-npx wigolo init --agents=<your-agent>
+npx wigolo init                              # set up the local engine — any system
+npx wigolo init --agents=claude-code,cursor  # …or set up + wire your day-to-day agents in one command
 ```
 
-Requires **Node ≥ 20** and ~1.5 GB of free disk on macOS, Linux, or Windows. One command wires the local engine into your agent.
+Requires **Node ≥ 20** and ~1.5 GB of free disk on macOS, Linux, or Windows. Bare `init` sets up the local engine: it downloads the browser engine and on-device models, runs a health check, and reports each component. Adding `--agents` wires the named agents in the same run, so a coding agent you use daily is ready in one command.
 
-- **`<your-agent>`** — one or more of `claude-code` · `cursor` · `codex` · `gemini-cli` · `vscode` · `windsurf` · `zed` · `antigravity` (comma-separated). wigolo writes the MCP config and instructions for you.
-- **Any other MCP client** — omit `--agents` and register `npx -y wigolo` yourself. The [installation guide](docs/installation.md) has the exact config block for every client, plus Docker, Homebrew, and single-file-binary channels.
+- **Supported agents** — `--agents` takes any of `claude-code` · `cursor` · `codex` · `gemini-cli` · `vscode` · `windsurf` · `zed` · `antigravity` (comma-separated); wigolo writes the MCP config and instructions for each.
+- **Any other setup** — any MCP client, agent framework, or self-hosted agent registers `npx -y wigolo` in its own MCP config. The [installation guide](docs/installation.md) has the exact config block for every client, plus Docker, Homebrew, and single-file-binary channels.
+- **More on the way** — the supported list keeps growing, and a PR to add your agent is welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Interactive setup** — `--interactive` is a plain-text flow; `--wizard` is the full terminal TUI.
-- **Defer downloads** — `--no-warmup` waits until first use. A failed component download never fails setup. init reports what's not ready with the exact fix and still wires your agent.
+- **Defer downloads** — `--no-warmup` waits until first use. A failed component download never fails setup; init reports what's not ready with the exact fix and still completes.
 
-`init` is unattended by default, so it's safe in scripts and CI. It runs the complete setup: it downloads the browser engine and on-device models, runs a health check, and prints a per-component summary. Any setup problem surfaces right here, before your agent's first call. **Search, fetch, crawl, extract, cache, and find-similar work with no API key.** Check it's healthy anytime:
+`init` is unattended by default, so it's safe in scripts and CI, and any setup problem surfaces right here in the per-component report, before your agent's first call. **Search, fetch, crawl, extract, cache, and find-similar work with no API key.** Check it's healthy anytime:
 
 ```bash
 npx wigolo doctor
@@ -244,11 +246,7 @@ One note for self-hosters: some challenge-protected sites score IP reputation, s
 
 <div align="center">
 
-<a href="https://star-history.com/#KnockOutEZ/wigolo&Date">
-<img alt="wigolo GitHub star history" src="https://api.star-history.com/svg?repos=knockoutez/wigolo&type=Date" width="720">
-</a>
-
-<sub>Live chart. <a href="https://github.com/KnockOutEZ/wigolo">Add a ⭐</a> if it's useful to you.</sub>
+<sub>📈 <a href="https://www.star-history.com/#KnockOutEZ/wigolo&Date">Live star-history chart</a> · <a href="https://github.com/KnockOutEZ/wigolo">add a ⭐</a> if wigolo is useful to you.</sub>
 
 </div>
 
