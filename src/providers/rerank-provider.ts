@@ -77,6 +77,31 @@ export async function withFetchRetry<T>(
 
 export function getRerankProvider(): Promise<RerankProvider> {
   if (cached) return cached;
+
+  // Use API reranker when WIGOLO_RERANK_BASE_URL is set (offloads to GPU via llm_service).
+  // Falls back to in-process ONNX Transformers.js if not configured.
+  const useApi = !!(process.env.WIGOLO_RERANK_BASE_URL);
+
+  if (useApi) {
+    cached = import('../search/reranker/api-rerank-provider.js')
+      .then(async (m) => {
+        const p = new m.ApiRerankProvider();
+        await p.warmup();
+        log.info('rerank provider ready', {
+          provider: 'rerank',
+          impl: 'api',
+          modelId: p.modelId,
+          baseUrl: process.env.WIGOLO_RERANK_BASE_URL,
+        });
+        return p;
+      })
+      .catch((err) => {
+        cached = null;
+        throw err;
+      });
+    return cached;
+  }
+
   cached = import('../search/reranker/transformers-rerank-provider.js')
     .then(async (m) => {
       const p = new m.TransformersRerankProvider();

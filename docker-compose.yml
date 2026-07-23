@@ -24,6 +24,9 @@ services:
       WIGOLO_LLM_BASE_URL: ${WIGOLO_LLM_BASE_URL:-http://172.17.0.1:8000/v1}
       WIGOLO_LLM_MODEL_OPENAI: ${WIGOLO_LLM_MODEL_OPENAI:-qwen3.5-4b}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-mclab-llm-key}
+      # Reranker via llm_service (offloads to GPU, round-robin across LLAMACPP_RERANK_SERVERS)
+      WIGOLO_RERANK_BASE_URL: ${WIGOLO_RERANK_BASE_URL:-http://172.17.0.1:8000}
+      WIGOLO_RERANK_MODEL: ${WIGOLO_RERANK_MODEL:-ms-marco-MiniLM-L-6-v2}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3333/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
