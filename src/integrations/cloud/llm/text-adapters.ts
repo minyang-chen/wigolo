@@ -51,7 +51,8 @@ export async function callAnthropicText(opts: TextCallOpts, apiKey: string): Pro
 
 export async function callOpenAIText(opts: TextCallOpts, apiKey: string): Promise<TextCallResult> {
   const { default: OpenAI } = await import('openai');
-  const client = new OpenAI({ apiKey });
+  const baseURL = process.env.WIGOLO_LLM_BASE_URL ?? undefined;
+  const client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
   const start = Date.now();
   const response = await client.chat.completions.create(
     {

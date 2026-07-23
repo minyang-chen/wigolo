@@ -18,11 +18,11 @@ services:
       # Point at our existing SearXNG instance for additional search engine coverage.
       # SearXNG runs on port 8588 on this host (via web_search_service compose).
       SEARXNG_URL: ${SEARXNG_URL:-http://172.17.0.1:8588}
-      # LLM provider for research + answer synthesis (optional).
+      # LLM provider for research + answer synthesis — use local llm_service (port 8000).
       # Without this, search/fetch/crawl/extract still work fully keyless.
-      # Use local vLLM server on this homelab node.
       WIGOLO_LLM_PROVIDER: ${WIGOLO_LLM_PROVIDER:-openai}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://172.17.0.1:8081/v1}
+      WIGOLO_LLM_BASE_URL: ${WIGOLO_LLM_BASE_URL:-http://172.17.0.1:8000/v1}
+      WIGOLO_LLM_MODEL_OPENAI: ${WIGOLO_LLM_MODEL_OPENAI:-qwen3.5-4b}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-mclab-llm-key}
     restart: unless-stopped
     healthcheck:

@@ -76,7 +76,7 @@ export class TransformersRerankProvider implements RerankProvider {
 
     this.loadPromise = Promise.all([
       AutoTokenizer.from_pretrained(this.modelId),
-      AutoModelForSequenceClassification.from_pretrained(this.modelId),
+      AutoModelForSequenceClassification.from_pretrained(this.modelId, { dtype: 'fp32' }),
     ])
       .then(([tokenizer, model]) => {
         this.tokenizer = tokenizer;

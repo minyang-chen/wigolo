@@ -7,7 +7,8 @@ export async function callOpenAI(
   opts: LLMCallOpts,
   apiKey: string,
 ): Promise<LLMExtractResult> {
-  const client = new OpenAI({ apiKey });
+  const baseURL = process.env.WIGOLO_LLM_BASE_URL ?? undefined;
+  const client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
   const model = opts.modelOverride ?? DEFAULT_MODEL;
   const start = Date.now();
 
