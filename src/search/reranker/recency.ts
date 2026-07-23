@@ -1,7 +1,13 @@
 const RECENCY_TOKENS = /\b(recent|latest|new|just released|today|this week)\b/i;
 
+// Finance queries are almost always time-sensitive — stale earnings, rates,
+// or price data is actively harmful. Trigger recency boost for any financial
+// intent keyword so old reports don't outrank current ones.
+const FINANCE_RECENCY_TOKENS = /\b(earnings|revenue|eps|guidance|forecast|outlook|price|rate|rates|dividend|quarter|q[1-4]|fiscal|inflation|gdp|cpi|pce|fomc|fed|jobs|payroll|upgrade|downgrade|target|rating)\b/i;
+
 export function hasRecencyIntent(query: string, now: Date = new Date()): boolean {
   if (RECENCY_TOKENS.test(query)) return true;
+  if (FINANCE_RECENCY_TOKENS.test(query)) return true;
   const yearMatches = query.match(/\b(20\d{2})\b/g);
   if (!yearMatches) return false;
   const currentYear = now.getUTCFullYear();

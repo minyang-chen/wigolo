@@ -78,6 +78,49 @@ const KNOWN_SUBJECT_DOMAIN: Record<string, string[]> = {
   pnpm: ['pnpm.io'],
   yarn: ['yarnpkg.com'],
   mcp: ['modelcontextprotocol.io', 'spec.modelcontextprotocol.io', 'docs.anthropic.com'],
+
+  // ── Finance: news sources ────────────────────────────────────────────────
+  bloomberg: ['bloomberg.com', 'bloomberg.co.uk'],
+  reuters: ['reuters.com'],
+  wsj: ['wsj.com'],
+  ft: ['ft.com'],
+  cnbc: ['cnbc.com'],
+  barrons: ['barrons.com'],
+  marketwatch: ['marketwatch.com'],
+  seeking: ['seekingalpha.com'],
+  motley: ['fool.com'],
+  benzinga: ['benzinga.com'],
+  zacks: ['zacks.com'],
+  thestreet: ['thestreet.com'],
+  investor: ['investors.com'],
+
+  // ── Finance: data & exchanges ─────────────────────────────────────────────
+  nasdaq: ['nasdaq.com'],
+  nyse: ['nyse.com'],
+  yahoo: ['finance.yahoo.com'],
+  finviz: ['finviz.com'],
+  stockanalysis: ['stockanalysis.com'],
+  macrotrends: ['macrotrends.net'],
+  wisesheets: ['wisesheets.io'],
+
+  // ── Finance: regulators & government ─────────────────────────────────────
+  sec: ['sec.gov', 'edgar.sec.gov'],
+  fed: ['federalreserve.gov'],
+  treasury: ['treasury.gov'],
+  bls: ['bls.gov'],
+  bea: ['bea.gov'],
+  cme: ['cmegroup.com'],
+
+  // ── Finance: per-ticker IR pages ─────────────────────────────────────────
+  nvda: ['investor.nvidia.com', 'nvidia.com'],
+  nvidia: ['investor.nvidia.com', 'nvidia.com'],
+  aapl: ['investor.apple.com', 'apple.com'],
+  msft: ['microsoft.com', 'investor.microsoft.com'],
+  googl: ['abc.xyz', 'investor.google.com'],
+  amzn: ['ir.aboutamazon.com'],
+  meta: ['investor.fb.com'],
+  tsla: ['ir.tesla.com'],
+  brk: ['berkshirehathaway.com'],
 };
 
 function extractSubjects(query: string): string[] {
